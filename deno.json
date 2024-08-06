@@ -1,7 +1,16 @@
 {
-  "tasks": {
-    "openapi": "deno run -A npm:@openapitools/openapi-generator-cli generate -i https://api.artifactsmmo.com/openapi.json -g typescript-fetch -o ./api --additional-properties=importFileExtension=.ts,basePath='https://api.artifactsmmo.com'",
-    "dev": "deno lint --ignore=./api --fix && deno fmt --ignore=./api && deno run --env -A --watch main.ts",
-    "start": "deno task openapi && deno run --env -A main.ts"
-  }
+    "tasks": {
+        "openapi": "deno run -A npm:@openapitools/openapi-generator-cli generate -i https://api.artifactsmmo.com/openapi.json -g typescript-fetch -o ./api --additional-properties=importFileExtension=.ts,basePath='https://api.artifactsmmo.com'",
+        "dev": "deno lint --ignore=./api --fix && deno fmt --ignore=./api && deno run --env -A --watch main.ts",
+        "start": "deno task openapi && deno run --env -A main.ts"
+    },
+    "imports": {
+        "random": "jsr:@ns/random@^0.1.1",
+        "@std/async": "jsr:@std/async@^1.0.3",
+        "delayed": "jsr:@jotsr/delayed@^2.1.1"
+    },
+    "fmt": {
+        "indentWidth": 4,
+        "lineWidth": 120
+    }
 }

@@ -2,7 +2,21 @@
   "version": "3",
   "packages": {
     "specifiers": {
+      "jsr:@jotsr/delayed@^2.1.1": "jsr:@jotsr/delayed@2.1.1",
+      "jsr:@ns/random@^0.1.1": "jsr:@ns/random@0.1.1",
+      "jsr:@std/async@^1.0.3": "jsr:@std/async@1.0.3",
       "npm:@openapitools/openapi-generator-cli": "npm:@openapitools/openapi-generator-cli@2.13.4_@nestjs+common@10.3.0__reflect-metadata@0.1.13__rxjs@7.8.1_axios@1.6.8_rxjs@7.8.1_reflect-metadata@0.1.13"
+    },
+    "jsr": {
+      "@jotsr/delayed@2.1.1": {
+        "integrity": "b636cc1ae8a2843412738f40c1cf5f117d909bf6986dbce7af945afd363b65b7"
+      },
+      "@ns/random@0.1.1": {
+        "integrity": "e1af978385cd6e4417882d642c0e7157b7d355eed9e4f986e350a5126d39a8f5"
+      },
+      "@std/async@1.0.3": {
+        "integrity": "6ed64678db43451683c6c176a21426a2ccd21ba0269ebb2c36133ede3f165792"
+      }
     },
     "npm": {
       "@babel/runtime@7.25.0": {
@@ -687,5 +701,12 @@
       }
     }
   },
-  "remote": {}
+  "remote": {},
+  "workspace": {
+    "dependencies": [
+      "jsr:@jotsr/delayed@^2.1.1",
+      "jsr:@ns/random@^0.1.1",
+      "jsr:@std/async@^1.0.3"
+    ]
+  }
 }
