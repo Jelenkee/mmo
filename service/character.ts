@@ -1,4 +1,10 @@
-import { CharactersApi, MapsApi, MyCharactersApi, ResponseError } from "../api/index.ts";
+import {
+    CharacterMovementResponseSchema,
+    CharactersApi,
+    MapsApi,
+    MyCharactersApi,
+    ResponseError,
+} from "../api/index.ts";
 import { CONFIG } from "../constants.ts";
 import { choice } from "random";
 import { delay } from "@std/async";
@@ -13,30 +19,31 @@ export async function farm(name: string) {
     });
     const map = choice(maps.data);
     const cooldown = await getCooldown(name);
-    try {
-        console.log(name, cooldown);
-
-        const res = await myCharactersApi.actionGatheringMyNameActionGatheringPost({ name });
-        console.log(name,"remain",res.data.cooldown.remainingSeconds,res.data.details.items[0]);
-        
-    } catch (_error) {
-        // nothing
-    }
 
     if (cooldown > 0) {
-        console.log(name, "is cooling down", cooldown);
-        return;
+        //console.log(name, "is cooling down", cooldown);
+        //return;
     }
-    console.log(name, map.content?.code, map.x, map.y);
+    //console.log(name, map.content?.code, map.x, map.y);
     try {
-        const res = await myCharactersApi.actionMoveMyNameActionMovePost({
-            name,
-            destinationSchema: {
-                x: map.x,
-                y: map.y,
-            },
-        });
-        console.log("moved", name);
+        let res: CharacterMovementResponseSchema = null as unknown as CharacterMovementResponseSchema;
+        try {
+            res = await myCharactersApi.actionMoveMyNameActionMovePost({
+                name,
+                destinationSchema: {
+                    x: map.x,
+                    y: map.y,
+                },
+            });
+            console.log("moved", name);
+        } catch (error) {
+            if (error instanceof ResponseError) {
+                if (error.response.status == 499) {
+                    console.log(name, "is chilling");
+                    return;
+                }
+            }
+        }
 
         await delay((res.data.cooldown.remainingSeconds + 1) * 1000);
         await myCharactersApi.actionGatheringMyNameActionGatheringPost({ name });
@@ -51,7 +58,6 @@ export async function farm(name: string) {
             throw error;
         }
     }
-    console.log("finish", name);
 }
 
 async function getCooldown(name: string): Promise<number> {
