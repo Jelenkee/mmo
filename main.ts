@@ -1,11 +1,13 @@
-import { setup } from "./constants.ts";
+import { CHAR_NAMES, setup } from "./constants.ts";
 import { interval } from "delayed";
-import { loop } from "./loop.ts";
+import { tick } from "./service/character.ts";
 
 if (import.meta.main) {
     await setup();
 
-    for await (const _result of interval(loop, 4000)) {
-        //
-    }
+    await Promise.allSettled(CHAR_NAMES.map(async (name) => {
+        for await (const _result of interval(tick, 2000, {}, name)) {
+            //
+        }
+    }));
 }
