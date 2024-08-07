@@ -1,5 +1,4 @@
 import { setup } from "./constants.ts";
-//import { loop } from "./loop.ts";
 import { interval } from "delayed";
 import { loop } from "./loop.ts";
 
