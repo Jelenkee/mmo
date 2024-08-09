@@ -10,6 +10,7 @@ import {
     MyAccountApi,
     MyCharactersApi,
     ResourcesApi,
+    ResourceSchema,
     ResponseError,
 } from "../api/index.ts";
 import { CONFIG } from "../constants.ts";
@@ -81,17 +82,26 @@ async function gather(char: CharacterResponseSchema) {
         contentType: "resource",
     })).data;
 
+    const bankItems = (await myAccountApi.getBankItemsMyBankItemsGet({ size: 100 })).data;
+
     const resources = await resourcesApi.getAllResourcesResourcesGet({ size: 100 });
-    const mineableResource: string[] = [];
+    const mineableResources: ResourceSchema[] = [];
     resources.data.filter((res) => {
         const charLevel = (char.data as unknown as Record<string, number>)[res.skill + "Level"];
         if (charLevel >= res.level) {
-            mineableResource.push(res.code);
+            mineableResources.push(res);
         }
     });
+    const resource = mineableResources.map((res) => {
+        const drop = res.drops.toSorted((a, b) => a.rate - b.rate)[0];
+        return {
+            code: res.code,
+            bankQuantity: bankItems.filter((bi) => bi.code == drop.code)[0].quantity,
+        };
+    })
+        .sort((a, b) => a.bankQuantity - b.bankQuantity)[0];
 
-    const filteredMaps = maps.filter((map) => mineableResource.includes(map.content?.code ?? ""));
-    const map = choice(filteredMaps);
+    const map = maps.filter((map) => resource.code === map.content?.code)[0];
 
     char = await move(char, map.x, map.y);
 
@@ -106,13 +116,9 @@ async function fight(char: CharacterResponseSchema) {
         contentType: "monster",
     })).data;
 
-    const monsters = await monstersApi.getAllMonstersMonstersGet({ size: 100 });
-    const fightableMonsters: string[] = [];
-    monsters.data.filter((res) => {
-        if (res.level <= 1) {
-            fightableMonsters.push(res.code);
-        }
-    });
+    const fightableMonsters = (await monstersApi.getAllMonstersMonstersGet({ maxLevel: 1, size: 100 })).data.map((m) =>
+        m.code
+    );
 
     const filteredMaps = maps.filter((map) => fightableMonsters.includes(map.content?.code ?? ""));
     const map = choice(filteredMaps);
@@ -241,7 +247,8 @@ async function move(char: CharacterResponseSchema, x: number, y: number): Promis
 
 async function depositResourcesIfNecessary(char: CharacterResponseSchema): Promise<CharacterResponseSchema> {
     const totalItems = char.data.inventory?.map((slot) => slot.quantity).reduce((a, c) => a + c, 0) ?? 0;
-    if (totalItems + 5 < char.data.inventoryMaxItems) {
+    const freeSlots = char.data.inventory?.filter(slot=>!slot.code).length ?? 0;
+    if (totalItems + 5 < char.data.inventoryMaxItems && freeSlots > 3) {
         return char;
     }
     await moveToBank(char);
