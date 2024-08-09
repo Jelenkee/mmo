@@ -1,7 +1,9 @@
 import {
     CharacterResponseSchema,
     CharactersApi,
+    CharacterSchema,
     CooldownSchema,
+    GetAllItemsItemsGetCraftSkillEnum,
     ItemsApi,
     MapsApi,
     MonstersApi,
@@ -13,6 +15,7 @@ import {
 import { CONFIG } from "../constants.ts";
 import { choice, randInt } from "random";
 import { delay } from "@std/async";
+import { getMostSkilledChar } from "./characters.ts";
 
 const myCharactersApi = new MyCharactersApi(CONFIG);
 const charactersApi = new CharactersApi(CONFIG);
@@ -25,15 +28,27 @@ const myAccountApi = new MyAccountApi(CONFIG);
 export async function tick(name: string) {
     try {
         let char = await getChar(name);
-        const cooling = await hasCooldown(char);
+        const cooling = hasCooldown(char);
 
         if (cooling) {
             console.log(name, "is cooling down");
             return;
         }
+
         char = await depositResourcesIfNecessary(char);
 
-        await cook(char);
+        for (const skill of Object.values(GetAllItemsItemsGetCraftSkillEnum)) {
+            const skilledChar = getMostSkilledChar(skill);
+            if (skilledChar === name) {
+                const t1 = new Date().getTime();
+                await craft(char, skill);
+                const t2 = new Date().getTime();
+                const duration = t2 - t1;
+                if (duration > 10_000) {
+                    return;
+                }
+            }
+        }
         char = await getChar(name);
         const select = randInt(1, 10);
         if (select >= 8) {
@@ -108,25 +123,36 @@ async function fight(char: CharacterResponseSchema) {
     await sleep(battleResult.data.cooldown);
 }
 
-async function cook(char: CharacterResponseSchema) {
-    const cookableItems = (await itemsApi.getAllItemsItemsGet({
-        craftSkill: "cooking",
-        maxLevel: char.data.cookingLevel,
+async function craft(char: CharacterResponseSchema, skill: GetAllItemsItemsGetCraftSkillEnum) {
+    const craftableItems = (await itemsApi.getAllItemsItemsGet({
+        craftSkill: skill,
+        maxLevel: char.data[(skill + "Level") as keyof CharacterSchema] as number,
         size: 100,
     })).data;
     const bankItems = (await myAccountApi.getBankItemsMyBankItemsGet({ size: 100 })).data;
 
-    cookableItems.sort((a, b) => {
+    craftableItems.sort((a, b) => {
         const aQ = bankItems.filter((i) => i.code == a.code).map((i) => i.quantity)[0] ?? 0;
         const bQ = bankItems.filter((i) => i.code == b.code).map((i) => i.quantity)[0] ?? 0;
 
         return aQ - bQ;
     });
 
-    const target = cookableItems
+    let minQuantity = 5;
+    if (skill === GetAllItemsItemsGetCraftSkillEnum.Cooking) {
+        minQuantity = 100;
+    } else if (
+        skill === GetAllItemsItemsGetCraftSkillEnum.Woodcutting || skill === GetAllItemsItemsGetCraftSkillEnum.Mining
+    ) {
+        minQuantity = 50;
+    } else if (skill === GetAllItemsItemsGetCraftSkillEnum.Jewelrycrafting) {
+        minQuantity = 10;
+    }
+
+    const target = craftableItems
         .filter((item) => {
             const quantity = bankItems.filter((i) => i.code == item.code).map((i) => i.quantity)[0] ?? 0;
-            return quantity < 100;
+            return quantity < minQuantity;
         })
         .filter((i) => {
             if (i.craft == null) {
@@ -155,9 +181,15 @@ async function cook(char: CharacterResponseSchema) {
             });
             await sleep(fetchResult.data.cooldown);
         } catch (error) {
-            if (error instanceof ResponseError && error.response.status === 461) {
-                console.log(char.data.name, item.code, 461);
-                return;
+            if (error instanceof ResponseError) {
+                if (error.response.status === 461) {
+                    console.log(char.data.name, item.code, 461);
+                    return;
+                } else if (error.response.status === 404) {
+                    // someone was faster
+                    console.log(char.data.name, item.code, 404);
+                    return;
+                }
             }
             throw error;
         }
@@ -165,7 +197,7 @@ async function cook(char: CharacterResponseSchema) {
 
     const map = (await mapsApi.getAllMapsMapsGet({
         contentType: "workshop",
-        contentCode: "cooking",
+        contentCode: skill,
     })).data[0];
     char = await move(char, map.x, map.y);
     const craftResult = await myCharactersApi.actionCraftingMyNameActionCraftingPost({

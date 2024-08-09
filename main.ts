@@ -1,6 +1,6 @@
-import { CHAR_NAMES, setup } from "./constants.ts";
 import { interval } from "delayed";
 import { tick } from "./service/character.ts";
+import { CHAR_NAMES, setup } from "./service/characters.ts";
 
 if (import.meta.main) {
     await setup();
