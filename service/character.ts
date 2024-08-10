@@ -67,6 +67,7 @@ export async function tick(name: string) {
                 error.response.status,
                 error.message,
                 await error.response.json().catch((_) => error.response.text()),
+                //error.stack,
             );
         } else {
             console.error("unexpected");
@@ -121,8 +122,9 @@ async function fight(char: CharacterResponseSchema) {
         contentType: "monster",
     })).data;
 
-    const fightableMonsters =
-        (await monstersApi.getAllMonstersMonstersGet({ maxLevel: char.data.level, size: 100 })).data;
+    const fightableMonsters = (await monstersApi.getAllMonstersMonstersGet({ maxLevel: char.data.level, size: 100 }))
+        .data
+        .filter((m) => !tooStrong.has(m.code));
     const bankItems = await getBankItems();
     const monsters = fightableMonsters.sort((a, b) => a.level - b.level).flatMap((mon) => {
         return mon.drops.map((drop) => {
@@ -141,6 +143,9 @@ async function fight(char: CharacterResponseSchema) {
     char = await move(char, map.x, map.y);
 
     const battleResult = await myCharactersApi.actionFightMyNameActionFightPost({ name });
+    if (battleResult.data.fight.result === "lose") {
+        tooStrong.add(monster.mon.code);
+    }
     await sleep(battleResult.data.cooldown);
 }
 
@@ -163,15 +168,15 @@ async function prepareForMonster(
     );
     const lowestResistance = resistanceKeys
         .filter((key) => (monster[key as keyof MonsterSchema] as number) < 0)
-        .map((key) => key.slice(resPrefix.length)).at(0);
+        .map((key) => key.slice(resPrefix.length).toLowerCase()).at(0);
 
     const highestResistance = resistanceKeys
         .filter((key) => (monster[key as keyof MonsterSchema] as number) > 0)
-        .map((key) => key.slice(resPrefix.length)).at(0);
+        .map((key) => key.slice(resPrefix.length).toLowerCase()).at(0);
 
     const highestAttack = attackKeys
         .filter((key) => (monster[key as keyof MonsterSchema] as number) > 0)
-        .map((key) => key.slice(attackPrefix.length)).at(0);
+        .map((key) => key.slice(attackPrefix.length).toLowerCase()).at(0);
 
     const weaponItems = (await itemsApi.getAllItemsItemsGet({ type: "weapon" })).data
         .sort((a, b) => b.level - a.level);
@@ -209,7 +214,12 @@ async function prepareForMonster(
 
     const foodItems = (await itemsApi.getAllItemsItemsGet({ type: "consumable" })).data
         .sort((a, b) => b.level - a.level);
-    const foods = foodItems.flatMap((fi) => bankItems.filter((bi) => fi.code === bi.code));
+    const effectiveFoodItems = foodItems
+        .filter((fi) => (fi.effects ?? []).some((effect) => effect.name === `boost_dmg_${lowestResistance}`));
+    const hpFoodItems = foodItems
+        .filter((fi) => (fi.effects ?? []).some((effect) => effect.name === "boost_hp" || effect.name === "restore"));
+    const foods = effectiveFoodItems.concat(hpFoodItems).concat(foodItems)
+        .flatMap((fi) => bankItems.filter((bi) => fi.code === bi.code));
     char = await equip(char, foods.at(0), "consumable1", "consumable1Slot");
     char = await equip(char, foods.at(1), "consumable2", "consumable2Slot");
 
@@ -237,6 +247,11 @@ async function prepareForMonster(
     return char;
 }
 
+const tooStrong: Set<string> = new Set();
+setInterval(() => {
+    tooStrong.clear();
+}, 1000 * 60 * 30);
+
 async function equip(
     char: CharacterResponseSchema,
     item: SimpleItemSchema | undefined,
@@ -262,11 +277,23 @@ async function equip(
             simpleItemSchema: { code: item.code, quantity: 1 },
         });
         await sleep(withdrawResult.data.cooldown);
-        const equipResult = await myCharactersApi.actionEquipItemMyNameActionEquipPost({
-            name: char.data.name,
-            equipSchema: { code: withdrawResult.data.item.code, slot },
-        });
-        await sleep(equipResult.data.cooldown);
+        try {
+            const equipResult = await myCharactersApi.actionEquipItemMyNameActionEquipPost({
+                name: char.data.name,
+                equipSchema: { code: withdrawResult.data.item.code, slot },
+            });
+            await sleep(equipResult.data.cooldown);
+        } catch (error) {
+            if (error instanceof ResponseError) {
+                if (error.response.status === 485) {
+                    console.log("without", withdrawResult.data.item.code);
+                }else {
+                    throw error
+                }
+            }else {
+                throw error
+            }
+        }
     }
     return await getChar(char.data.name);
 }
