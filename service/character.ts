@@ -97,15 +97,18 @@ async function gather(char: CharacterResponseSchema) {
             mineableResources.push(res);
         }
     });
-    const resource = mineableResources.flatMap((res) => {
-        return res.drops.map((drop) => {
+    const resourceStations = mineableResources.flatMap((res) => {
+        return res.drops.filter((drop) => drop.rate < 1000).map((drop) => {
             return {
                 code: res.code,
                 bankQuantityWithRatio: getBankQuantity(bankItems, drop.code) * drop.rate,
+                drop,
             };
         });
     })
-        .sort((a, b) => a.bankQuantityWithRatio - b.bankQuantityWithRatio)[0];
+        .sort((a, b) => a.bankQuantityWithRatio - b.bankQuantityWithRatio);
+
+    const resource = resourceStations[0];
 
     const map = maps.filter((map) => resource.code === map.content?.code)[0];
 
@@ -127,10 +130,11 @@ async function fight(char: CharacterResponseSchema) {
         .filter((m) => !tooStrong.has(m.code));
     const bankItems = await getBankItems();
     const monsters = fightableMonsters.sort((a, b) => a.level - b.level).flatMap((mon) => {
-        return mon.drops.map((drop) => {
+        return mon.drops.filter((drop) => drop.rate < 1000).map((drop) => {
             return {
                 mon: mon,
                 bankQuantityWithRatio: getBankQuantity(bankItems, drop.code) * drop.rate,
+                drop,
             };
         });
     }).sort((a, b) => a.bankQuantityWithRatio - b.bankQuantityWithRatio);
@@ -287,11 +291,11 @@ async function equip(
             if (error instanceof ResponseError) {
                 if (error.response.status === 485) {
                     console.log("without", withdrawResult.data.item.code);
-                }else {
-                    throw error
+                } else {
+                    throw error;
                 }
-            }else {
-                throw error
+            } else {
+                throw error;
             }
         }
     }
