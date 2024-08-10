@@ -188,7 +188,7 @@ async function prepareForMonster(
         .filter((wi) => (wi.effects ?? []).some((effect) => effect.name === `attack_${lowestResistance}`));
     const normalWeaponItems = weaponItems
         .filter((wi) => !(wi.effects ?? []).some((effect) => effect.name === `attack_${highestResistance}`));
-    const weapons = effectiveWeaponItems.concat(normalWeaponItems).flatMap((wi) =>
+    const weapons = effectiveWeaponItems.concat(normalWeaponItems).concat(weaponItems).flatMap((wi) =>
         bankItems.filter((bi) => wi.code === bi.code)
     );
     char = await equip(char, weapons.at(0), "weapon", "weaponSlot");
@@ -196,24 +196,23 @@ async function prepareForMonster(
     const shieldItems = (await itemsApi.getAllItemsItemsGet({ type: "shield" })).data
         .sort((a, b) => b.level - a.level);
     const shields = shieldItems.flatMap((wi) => bankItems.filter((bi) => wi.code === bi.code));
-
     char = await equip(char, shields.at(0), "shield", "shieldSlot");
 
     const ringItems = (await itemsApi.getAllItemsItemsGet({ type: "ring" })).data
-        .sort((a, b) => b.level - a.level)
-        .filter((ri) =>
-            !lowestResistance || (ri.effects ?? []).some((effect) => effect.name === `dmg_${lowestResistance}`)
-        );
-    const rings = ringItems.flatMap((wi) => bankItems.filter((bi) => wi.code === bi.code));
+        .sort((a, b) => b.level - a.level);
+    const effectiveRingItems = ringItems
+        .filter((ri) => (ri.effects ?? []).some((effect) => effect.name === `dmg_${lowestResistance}`));
+    const rings = effectiveRingItems.concat(ringItems).flatMap((wi) => bankItems.filter((bi) => wi.code === bi.code));
     char = await equip(char, rings.at(0), "ring1", "ring1Slot");
     char = await equip(char, rings.at(1), "ring2", "ring2Slot");
 
     const amuletItems = (await itemsApi.getAllItemsItemsGet({ type: "amulet" })).data
-        .sort((a, b) => b.level - a.level)
-        .filter((ri) =>
-            !lowestResistance || (ri.effects ?? []).some((effect) => effect.name === `dmg_${lowestResistance}`)
-        );
-    const amulets = amuletItems.flatMap((wi) => bankItems.filter((bi) => wi.code === bi.code));
+        .sort((a, b) => b.level - a.level);
+    const effectiveAmuletItems = amuletItems
+        .filter((ai) => (ai.effects ?? []).some((effect) => effect.name === `dmg_${lowestResistance}`));
+    const amulets = effectiveAmuletItems.concat(amuletItems).flatMap((wi) =>
+        bankItems.filter((bi) => wi.code === bi.code)
+    );
     char = await equip(char, amulets.at(0), "amulet", "amuletSlot");
 
     const foodItems = (await itemsApi.getAllItemsItemsGet({ type: "consumable" })).data
