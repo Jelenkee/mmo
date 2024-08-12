@@ -6,8 +6,10 @@ import {
     DropRateSchema,
     GetAllItemsItemsGetCraftSkillEnum,
     GetAllItemsItemsGetTypeEnum,
+    GetAllMapsMapsGetContentTypeEnum,
     ItemsApi,
     MapsApi,
+    MapSchema,
     MonstersApi,
     MonsterSchema,
     MyCharactersApi,
@@ -97,7 +99,7 @@ async function getNextQuest(char: CharacterResponseSchema): Promise<Quest> {
     const resourceQuests: Quest[] = mineableResources.sort((a, b) => b.level - a.level).flatMap((res) => {
         return res.drops.filter((drop) => drop.rate < 1000).map((drop) => {
             return {
-                res: res,
+                res,
                 qr: getBankQuantity(bankItems, drop.code) * drop.rate,
                 drop,
             };
@@ -123,37 +125,22 @@ async function getNextQuest(char: CharacterResponseSchema): Promise<Quest> {
 }
 
 async function gather(char: CharacterResponseSchema, resource: ResourceSchema) {
-    const name = char.data.name;
+    char = await moveTo(char, "resource", resource.code);
 
-    const maps = (await mapsApi.getAllMapsMapsGet({
-        contentType: "resource",
-    })).data;
-
-    const map = maps.filter((map) => resource.code === map.content?.code)[0];
-
-    char = await move(char, map.x, map.y);
-
-    const gatherResult = await myCharactersApi.actionGatheringMyNameActionGatheringPost({ name });
+    const gatherResult = await myCharactersApi.actionGatheringMyNameActionGatheringPost({ name: char.data.name });
     await sleep(gatherResult.data.cooldown);
 }
 
 async function fight(char: CharacterResponseSchema, monster: MonsterSchema) {
-    const name = char.data.name;
-
-    const maps = (await mapsApi.getAllMapsMapsGet({
-        contentType: "monster",
-    })).data;
     const bankItems = await getBankItems();
 
     const needFood = tooStrongWithoutFood.has(monster.code);
     char = await prepareForMonster(monster, char, bankItems, needFood);
     const hasFood = char.data.consumable1SlotQuantity > 0 || char.data.consumable2SlotQuantity > 0;
 
-    const map = maps.filter((map) => monster.code === map.content?.code)[0];
+    char = await moveTo(char, "monster", monster.code);
 
-    char = await move(char, map.x, map.y);
-
-    const battleResult = await myCharactersApi.actionFightMyNameActionFightPost({ name });
+    const battleResult = await myCharactersApi.actionFightMyNameActionFightPost({ name: char.data.name });
     if (battleResult.data.fight.result === "lose") {
         if (hasFood) {
             tooStrongWithFood.add(monster.code);
@@ -286,7 +273,7 @@ async function equip(
     charSlot: keyof CharacterSchema,
 ): Promise<CharacterResponseSchema> {
     if (item && char.data[charSlot] !== item.code) {
-        char = await moveToBank(char);
+        char = await moveTo(char, "bank");
         if (char.data[charSlot]) {
             const unequipResult = await myCharactersApi.actionUnequipItemMyNameActionUnequipPost({
                 name: char.data.name,
@@ -393,7 +380,7 @@ async function craft(char: CharacterResponseSchema, skill: GetAllItemsItemsGetCr
         return;
     }
 
-    char = await moveToBank(char);
+    char = await moveTo(char, "bank");
     for (const item of target.ingredients) {
         try {
             const fetchResult = await myCharactersApi.actionWithdrawBankMyNameActionBankWithdrawPost({
@@ -416,11 +403,7 @@ async function craft(char: CharacterResponseSchema, skill: GetAllItemsItemsGetCr
         }
     }
 
-    const map = (await mapsApi.getAllMapsMapsGet({
-        contentType: "workshop",
-        contentCode: skill,
-    })).data[0];
-    char = await move(char, map.x, map.y);
+    char = await moveTo(char, "workshop", skill);
 
     const craftResult = await myCharactersApi.actionCraftingMyNameActionCraftingPost({
         name: char.data.name,
@@ -428,7 +411,7 @@ async function craft(char: CharacterResponseSchema, skill: GetAllItemsItemsGetCr
     });
     await sleep(craftResult.data.cooldown);
 
-    char = await moveToBank(char);
+    char = await moveTo(char, "bank");
 
     for (const item of craftResult.data.details.items) {
         try {
@@ -456,6 +439,7 @@ async function move(char: CharacterResponseSchema, x: number, y: number): Promis
         name: char.data.name,
         destinationSchema: { x, y },
     });
+    //TODO update char coords
 
     await sleep(movement.data.cooldown);
     return await getChar(char.data.name);
@@ -474,7 +458,7 @@ async function deposit(
     char: CharacterResponseSchema,
     type: GetAllItemsItemsGetTypeEnum,
 ): Promise<CharacterResponseSchema> {
-    char = await moveToBank(char);
+    char = await moveTo(char, "bank");
     const items = (await itemsApi.getAllItemsItemsGet({ type, size: 100 })).data.map((item) => item.code);
 
     for (const slot of (char.data.inventory ?? [])) {
@@ -499,9 +483,20 @@ async function _refresh(_char: CharacterSchema) {
     // TODO
 }
 
-async function moveToBank(char: CharacterResponseSchema): Promise<CharacterResponseSchema> {
-    const bankMap = (await mapsApi.getAllMapsMapsGet({ contentType: "bank" })).data[0];
-    return await move(char, bankMap.x, bankMap.y);
+async function moveTo(
+    char: CharacterResponseSchema,
+    contentType?: GetAllMapsMapsGetContentTypeEnum,
+    contentCode?: string,
+): Promise<CharacterResponseSchema> {
+    const map = (await mapsApi.getAllMapsMapsGet({ contentType, contentCode })).data
+        .sort((a, b) => distance(a, char.data) - distance(b, char.data))[0];
+    return await move(char, map.x, map.y);
+}
+
+function distance(map: MapSchema, char: CharacterSchema): number {
+    const dx = map.x - char.x;
+    const dy = map.y - char.y;
+    return dx * dx + dy * dy;
 }
 
 function getBankQuantity(bankItems: SimpleItemSchema[], itemCode: string) {

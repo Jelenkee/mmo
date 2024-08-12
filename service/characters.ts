@@ -64,12 +64,9 @@ function charactersFor(characters: CharacterSchema[], skill: GetAllItemsItemsGet
 }
 
 function lev(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillEnum): number {
-    // @ts-ignore:  trust me
-    const level: number = char[skill + "Level"];
-    // @ts-ignore:  trust me
-    const xp: number = char[skill + "Xp"];
-    // @ts-ignore:  trust me
-    const maxxp: number = char[skill + "MaxXp"];
+    const level = char[(skill + "Level") as keyof CharacterSchema] as number;
+    const xp = char[(skill + "Xp") as keyof CharacterSchema] as number;
+    const maxxp = char[(skill + "MaxXp") as keyof CharacterSchema] as number;
 
     return level + (xp / maxxp);
 }
