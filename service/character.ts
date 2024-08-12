@@ -104,10 +104,9 @@ async function getNextQuest(char: CharacterResponseSchema): Promise<Quest> {
         });
     });
 
-    const fightableMonsters =
-        (await monstersApi.getAllMonstersMonstersGet({ maxLevel: /*TODO char.data.level*/ 8, size: 100 }))
-            .data
-            .filter((m) => !tooStrongWithFood.has(m.code));
+    const fightableMonsters = (await monstersApi.getAllMonstersMonstersGet({ maxLevel: char.data.level, size: 100 }))
+        .data
+        .filter((m) => !tooStrongWithFood.has(m.code));
     const monsterQuests: Quest[] = fightableMonsters.sort((a, b) => a.level - b.level).flatMap((mon) => {
         return mon.drops.filter((drop) => drop.rate < 1000).map((drop) => {
             return {
@@ -353,30 +352,49 @@ async function craft(char: CharacterResponseSchema, skill: GetAllItemsItemsGetCr
     }
 
     const target = craftableItems
-        .filter((item) => {
-            const quantity = getBankQuantity(bankItems, item.code);
-            return quantity < minQuantity;
-        })
-        .filter((i) => {
-            if (i.craft == null) {
-                return false;
+        .map((item) => {
+            if (item.craft == null) {
+                return;
             }
-            const items = i.craft?.items ?? [];
+            const items = item.craft?.items ?? [];
             if (items.length == 0) {
-                return false;
+                return;
             }
-            return items.every((item) => {
-                const q = getBankQuantity(bankItems, item.code);
-                return q >= item.quantity;
-            });
-        }).at(0);
+            const missing = minQuantity - getBankQuantity(bankItems, item.code);
+            if (missing <= 0) {
+                return;
+            }
+
+            const craftableQuantity = Math.min(
+                missing,
+                Math.min(...items.map((ing) => Math.floor(getBankQuantity(bankItems, ing.code) / ing.quantity))),
+            );
+            if (craftableQuantity <= 0) {
+                return;
+            }
+            const freeSlots = char.data.inventory?.filter((slot) => !slot.code).length ?? 0;
+            if (freeSlots < items.length + 1) {
+                return;
+            }
+            const inventorySpace = char.data.inventoryMaxItems -
+                (char.data.inventory?.map((slot) => slot.quantity).reduce((a, c) => a + c, 0) ?? 0);
+            const ingsForOneCraft = items.map((i) => i.quantity).reduce((a, c) => a + c, 0);
+            const maxCrafting = Math.min(craftableQuantity, Math.floor(inventorySpace / ingsForOneCraft));
+            return {
+                code: item.code,
+                quantity: maxCrafting,
+                ingredients: items.map((i) => ({ code: i.code, quantity: i.quantity * maxCrafting })),
+            };
+        })
+        .filter(Boolean)
+        .at(0);
 
     if (target == null) {
         return;
     }
 
     char = await moveToBank(char);
-    for (const item of target.craft?.items ?? []) {
+    for (const item of target.ingredients) {
         try {
             const fetchResult = await myCharactersApi.actionWithdrawBankMyNameActionBankWithdrawPost({
                 name: char.data.name,
@@ -403,10 +421,10 @@ async function craft(char: CharacterResponseSchema, skill: GetAllItemsItemsGetCr
         contentCode: skill,
     })).data[0];
     char = await move(char, map.x, map.y);
-    // TODO craft missing amount
+
     const craftResult = await myCharactersApi.actionCraftingMyNameActionCraftingPost({
         name: char.data.name,
-        craftingSchema: { code: target.code, quantity: 1 },
+        craftingSchema: { code: target.code, quantity: target.quantity },
     });
     await sleep(craftResult.data.cooldown);
 
