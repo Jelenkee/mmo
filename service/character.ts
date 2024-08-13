@@ -1,5 +1,4 @@
 import {
-    CharacterResponseSchema,
     CharactersApi,
     CharacterSchema,
     CooldownSchema,
@@ -80,18 +79,18 @@ export async function tick(name: string) {
     }
 }
 
-async function getChar(name: string): Promise<CharacterResponseSchema> {
-    return await charactersApi.getCharacterCharactersNameGet({ name });
+async function getChar(name: string): Promise<CharacterSchema> {
+    return (await charactersApi.getCharacterCharactersNameGet({ name })).data;
 }
 
 type Quest = { res?: ResourceSchema; mon?: MonsterSchema; qr: number; drop: DropRateSchema };
-async function getNextQuest(char: CharacterResponseSchema): Promise<Quest> {
+async function getNextQuest(char: CharacterSchema): Promise<Quest> {
     const bankItems = await getBankItems();
 
     const resources = await resourcesApi.getAllResourcesResourcesGet({ size: 100 });
     const mineableResources: ResourceSchema[] = [];
     resources.data.filter((res) => {
-        const charLevel = char.data[(res.skill + "Level") as keyof CharacterSchema] as number;
+        const charLevel = char[(res.skill + "Level") as keyof CharacterSchema] as number;
         if (charLevel >= res.level) {
             mineableResources.push(res);
         }
@@ -106,7 +105,7 @@ async function getNextQuest(char: CharacterResponseSchema): Promise<Quest> {
         });
     });
 
-    const fightableMonsters = (await monstersApi.getAllMonstersMonstersGet({ maxLevel: char.data.level, size: 100 }))
+    const fightableMonsters = (await monstersApi.getAllMonstersMonstersGet({ maxLevel: char.level, size: 100 }))
         .data
         .filter((m) => !tooStrongWithFood.has(m.code));
     const monsterQuests: Quest[] = fightableMonsters.sort((a, b) => a.level - b.level).flatMap((mon) => {
@@ -124,23 +123,23 @@ async function getNextQuest(char: CharacterResponseSchema): Promise<Quest> {
     return quests[0];
 }
 
-async function gather(char: CharacterResponseSchema, resource: ResourceSchema) {
+async function gather(char: CharacterSchema, resource: ResourceSchema) {
     char = await moveTo(char, "resource", resource.code);
 
-    const gatherResult = await myCharactersApi.actionGatheringMyNameActionGatheringPost({ name: char.data.name });
+    const gatherResult = await myCharactersApi.actionGatheringMyNameActionGatheringPost({ name: char.name });
     await sleep(gatherResult.data.cooldown);
 }
 
-async function fight(char: CharacterResponseSchema, monster: MonsterSchema) {
+async function fight(char: CharacterSchema, monster: MonsterSchema) {
     const bankItems = await getBankItems();
 
     const needFood = tooStrongWithoutFood.has(monster.code);
     char = await prepareForMonster(monster, char, bankItems, needFood);
-    const hasFood = char.data.consumable1SlotQuantity > 0 || char.data.consumable2SlotQuantity > 0;
+    const hasFood = char.consumable1SlotQuantity > 0 || char.consumable2SlotQuantity > 0;
 
     char = await moveTo(char, "monster", monster.code);
 
-    const battleResult = await myCharactersApi.actionFightMyNameActionFightPost({ name: char.data.name });
+    const battleResult = await myCharactersApi.actionFightMyNameActionFightPost({ name: char.name });
     if (battleResult.data.fight.result === "lose") {
         if (hasFood) {
             tooStrongWithFood.add(monster.code);
@@ -160,10 +159,10 @@ setInterval(() => {
 
 async function prepareForMonster(
     monster: MonsterSchema,
-    char: CharacterResponseSchema,
+    char: CharacterSchema,
     bankItems: SimpleItemSchema[],
     withFood: boolean,
-): Promise<CharacterResponseSchema> {
+): Promise<CharacterSchema> {
     const resPrefix = "res";
     const attackPrefix = "attack";
     const resistanceKeys = Object.keys(monster).filter((key) =>
@@ -267,33 +266,33 @@ async function prepareForMonster(
 }
 
 async function equip(
-    char: CharacterResponseSchema,
+    char: CharacterSchema,
     item: SimpleItemSchema | undefined,
     slot: UnequipSchemaSlotEnum,
     charSlot: keyof CharacterSchema,
-): Promise<CharacterResponseSchema> {
-    if (item && char.data[charSlot] !== item.code) {
+): Promise<CharacterSchema> {
+    if (item && char[charSlot] !== item.code) {
         char = await moveTo(char, "bank");
-        if (char.data[charSlot]) {
+        if (char[charSlot]) {
             const unequipResult = await myCharactersApi.actionUnequipItemMyNameActionUnequipPost({
-                name: char.data.name,
+                name: char.name,
                 unequipSchema: { slot },
             });
             await sleep(unequipResult.data.cooldown);
             const depositResult = await myCharactersApi.actionDepositBankMyNameActionBankDepositPost({
-                name: char.data.name,
+                name: char.name,
                 simpleItemSchema: { code: unequipResult.data.item.code, quantity: 1 },
             });
             await sleep(depositResult.data.cooldown);
         }
         const withdrawResult = await myCharactersApi.actionWithdrawBankMyNameActionBankWithdrawPost({
-            name: char.data.name,
+            name: char.name,
             simpleItemSchema: { code: item.code, quantity: 1 },
         });
         await sleep(withdrawResult.data.cooldown);
         try {
             const equipResult = await myCharactersApi.actionEquipItemMyNameActionEquipPost({
-                name: char.data.name,
+                name: char.name,
                 equipSchema: { code: withdrawResult.data.item.code, slot },
             });
             await sleep(equipResult.data.cooldown);
@@ -309,13 +308,13 @@ async function equip(
             }
         }
     }
-    return await getChar(char.data.name);
+    return await getChar(char.name);
 }
 
-async function craft(char: CharacterResponseSchema, skill: GetAllItemsItemsGetCraftSkillEnum) {
+async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillEnum) {
     const craftableItems = (await itemsApi.getAllItemsItemsGet({
         craftSkill: skill,
-        maxLevel: char.data[(skill + "Level") as keyof CharacterSchema] as number,
+        maxLevel: char[(skill + "Level") as keyof CharacterSchema] as number,
         size: 100,
     })).data;
     const bankItems = await getBankItems();
@@ -359,12 +358,12 @@ async function craft(char: CharacterResponseSchema, skill: GetAllItemsItemsGetCr
             if (craftableQuantity <= 0) {
                 return;
             }
-            const freeSlots = char.data.inventory?.filter((slot) => !slot.code).length ?? 0;
+            const freeSlots = char.inventory?.filter((slot) => !slot.code).length ?? 0;
             if (freeSlots < items.length + 1) {
                 return;
             }
-            const inventorySpace = char.data.inventoryMaxItems -
-                (char.data.inventory?.map((slot) => slot.quantity).reduce((a, c) => a + c, 0) ?? 0);
+            const inventorySpace = char.inventoryMaxItems -
+                (char.inventory?.map((slot) => slot.quantity).reduce((a, c) => a + c, 0) ?? 0);
             const ingsForOneCraft = items.map((i) => i.quantity).reduce((a, c) => a + c, 0);
             const maxCrafting = Math.min(craftableQuantity, Math.floor(inventorySpace / ingsForOneCraft));
             return {
@@ -384,18 +383,18 @@ async function craft(char: CharacterResponseSchema, skill: GetAllItemsItemsGetCr
     for (const item of target.ingredients) {
         try {
             const fetchResult = await myCharactersApi.actionWithdrawBankMyNameActionBankWithdrawPost({
-                name: char.data.name,
+                name: char.name,
                 simpleItemSchema: item,
             });
             await sleep(fetchResult.data.cooldown);
         } catch (error) {
             if (error instanceof ResponseError) {
                 if (error.response.status === 461) {
-                    console.log(char.data.name, item.code, 461);
+                    console.log(char.name, item.code, 461);
                     return;
                 } else if (error.response.status === 404) {
                     // someone was faster
-                    console.log(char.data.name, item.code, 404);
+                    console.log(char.name, item.code, 404);
                     return;
                 }
             }
@@ -406,7 +405,7 @@ async function craft(char: CharacterResponseSchema, skill: GetAllItemsItemsGetCr
     char = await moveTo(char, "workshop", skill);
 
     const craftResult = await myCharactersApi.actionCraftingMyNameActionCraftingPost({
-        name: char.data.name,
+        name: char.name,
         craftingSchema: { code: target.code, quantity: target.quantity },
     });
     await sleep(craftResult.data.cooldown);
@@ -416,13 +415,13 @@ async function craft(char: CharacterResponseSchema, skill: GetAllItemsItemsGetCr
     for (const item of craftResult.data.details.items) {
         try {
             const deposit = await myCharactersApi.actionDepositBankMyNameActionBankDepositPost({
-                name: char.data.name,
+                name: char.name,
                 simpleItemSchema: item,
             });
             await sleep(deposit.data.cooldown);
         } catch (error) {
             if (error instanceof ResponseError && error.response.status === 461) {
-                console.log(char.data.name, item.code, 461);
+                console.log(char.name, item.code, 461);
                 return;
             }
             throw error;
@@ -431,52 +430,55 @@ async function craft(char: CharacterResponseSchema, skill: GetAllItemsItemsGetCr
     return;
 }
 
-async function move(char: CharacterResponseSchema, x: number, y: number): Promise<CharacterResponseSchema> {
-    if (char.data.x == x && char.data.y == y) {
+async function _recycle(_char: CharacterSchema, _skill: GetAllItemsItemsGetCraftSkillEnum) {
+}
+
+async function move(char: CharacterSchema, x: number, y: number): Promise<CharacterSchema> {
+    if (char.x == x && char.y == y) {
         return char;
     }
     const movement = await myCharactersApi.actionMoveMyNameActionMovePost({
-        name: char.data.name,
+        name: char.name,
         destinationSchema: { x, y },
     });
     //TODO update char coords
 
     await sleep(movement.data.cooldown);
-    return await getChar(char.data.name);
+    return await getChar(char.name);
 }
 
-async function depositResourcesIfNecessary(char: CharacterResponseSchema): Promise<CharacterResponseSchema> {
-    const totalItems = char.data.inventory?.map((slot) => slot.quantity).reduce((a, c) => a + c, 0) ?? 0;
-    const freeSlots = char.data.inventory?.filter((slot) => !slot.code).length ?? 0;
-    if (totalItems + 5 < char.data.inventoryMaxItems && freeSlots > 3) {
+async function depositResourcesIfNecessary(char: CharacterSchema): Promise<CharacterSchema> {
+    const totalItems = char.inventory?.map((slot) => slot.quantity).reduce((a, c) => a + c, 0) ?? 0;
+    const freeSlots = char.inventory?.filter((slot) => !slot.code).length ?? 0;
+    if (totalItems + 5 < char.inventoryMaxItems && freeSlots > 3) {
         return char;
     }
     return await deposit(char, "resource");
 }
 
 async function deposit(
-    char: CharacterResponseSchema,
+    char: CharacterSchema,
     type: GetAllItemsItemsGetTypeEnum,
-): Promise<CharacterResponseSchema> {
+): Promise<CharacterSchema> {
     char = await moveTo(char, "bank");
     const items = (await itemsApi.getAllItemsItemsGet({ type, size: 100 })).data.map((item) => item.code);
 
-    for (const slot of (char.data.inventory ?? [])) {
+    for (const slot of (char.inventory ?? [])) {
         if (items.includes(slot.code)) {
             const deposit = await myCharactersApi.actionDepositBankMyNameActionBankDepositPost({
-                name: char.data.name,
+                name: char.name,
                 simpleItemSchema: slot,
             });
             await sleep(deposit.data.cooldown);
         }
     }
     const gold = await myCharactersApi.actionDepositBankGoldMyNameActionBankDepositGoldPost({
-        name: char.data.name,
-        depositWithdrawGoldSchema: { quantity: char.data.gold },
+        name: char.name,
+        depositWithdrawGoldSchema: { quantity: char.gold },
     });
     await sleep(gold.data.cooldown);
 
-    return getChar(char.data.name);
+    return getChar(char.name);
 }
 
 async function _refresh(_char: CharacterSchema) {
@@ -484,12 +486,12 @@ async function _refresh(_char: CharacterSchema) {
 }
 
 async function moveTo(
-    char: CharacterResponseSchema,
+    char: CharacterSchema,
     contentType?: GetAllMapsMapsGetContentTypeEnum,
     contentCode?: string,
-): Promise<CharacterResponseSchema> {
+): Promise<CharacterSchema> {
     const map = (await mapsApi.getAllMapsMapsGet({ contentType, contentCode })).data
-        .sort((a, b) => distance(a, char.data) - distance(b, char.data))[0];
+        .sort((a, b) => distance(a, char) - distance(b, char))[0];
     return await move(char, map.x, map.y);
 }
 
@@ -508,8 +510,8 @@ async function sleep(cooldown: CooldownSchema) {
     await delay(cooldown.remainingSeconds * 1000 + 100);
 }
 
-function hasCooldown(char: CharacterResponseSchema): boolean {
-    const expireDate = char.data.cooldownExpiration;
+function hasCooldown(char: CharacterSchema): boolean {
+    const expireDate = char.cooldownExpiration;
     if (expireDate == null) {
         return false;
     }
