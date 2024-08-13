@@ -6,8 +6,8 @@ import {
     GetAllItemsItemsGetCraftSkillEnum,
     GetAllItemsItemsGetTypeEnum,
     GetAllMapsMapsGetContentTypeEnum,
+    GrandExchangeApi,
     ItemsApi,
-    MapsApi,
     MapSchema,
     MonstersApi,
     MonsterSchema,
@@ -18,17 +18,18 @@ import {
     SimpleItemSchema,
     UnequipSchemaSlotEnum,
 } from "../api/index.ts";
-import { CONFIG } from "../constants.ts";
+import { CONFIG, MAX_LEVEL } from "../constants.ts";
 import { delay } from "@std/async";
 import { getMostSkilledChar } from "./characters.ts";
 import { getBankItems } from "./bank.ts";
+import { getAllMaps } from "./database.ts";
 
 const myCharactersApi = new MyCharactersApi(CONFIG);
 const charactersApi = new CharactersApi(CONFIG);
-const mapsApi = new MapsApi(CONFIG);
 const resourcesApi = new ResourcesApi(CONFIG);
 const itemsApi = new ItemsApi(CONFIG);
 const monstersApi = new MonstersApi(CONFIG);
+const grandExchangeApi = new GrandExchangeApi(CONFIG);
 
 export async function tick(name: string) {
     try {
@@ -54,6 +55,22 @@ export async function tick(name: string) {
                 }
             }
         }
+
+        for (
+            const skill of [
+                GetAllItemsItemsGetCraftSkillEnum.Gearcrafting,
+                GetAllItemsItemsGetCraftSkillEnum.Jewelrycrafting,
+                GetAllItemsItemsGetCraftSkillEnum.Weaponcrafting,
+            ]
+        ) {
+            const skilledChar = getMostSkilledChar(skill);
+            if (skilledChar === name && char[(skill + "Level") as keyof CharacterSchema] as number < MAX_LEVEL) {
+                if (Math.random() <= 0.2) {
+                    await sell(char, skill);
+                }
+            }
+        }
+
         char = await getChar(name);
         const quest = await getNextQuest(char);
         if (quest.mon) {
@@ -430,6 +447,46 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
     return;
 }
 
+async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillEnum) {
+    const sellableItems = (await itemsApi.getAllItemsItemsGet({
+        craftSkill: skill,
+        size: 100,
+    })).data.sort((a, b) => a.level - b.level);
+    const bankItems = await getBankItems();
+    const toSellItem = sellableItems
+        .map((item) => ({ code: item.code, quantity: Math.floor(getBankQuantity(bankItems, item.code) / 5) }))
+        .filter((i) => i.quantity > 0)[0];
+    if (toSellItem == null) {
+        return;
+    }
+    const totalItems = char.inventory?.map((slot) => slot.quantity).reduce((a, c) => a + c, 0) ?? 0;
+    const freeSlots = char.inventory?.filter((slot) => !slot.code).length ?? 0;
+    if (freeSlots === 0 || totalItems + toSellItem.quantity >= char.inventoryMaxItems) {
+        return;
+    }
+    char = await moveTo(char, "bank");
+    const withdrawResult = await myCharactersApi.actionWithdrawBankMyNameActionBankWithdrawPost({
+        name: char.name,
+        simpleItemSchema: toSellItem,
+    });
+    await sleep(withdrawResult.data.cooldown);
+    char = await moveTo(char, "grand_exchange");
+    const price = (await grandExchangeApi.getGeItemGeCodeGet({ code: toSellItem.code })).data.sellPrice;
+    if (price == null) {
+        return;
+    }
+    const sellResult = await myCharactersApi.actionGeSellItemMyNameActionGeSellPost({
+        name: char.name,
+        gETransactionItemSchema: {
+            code: toSellItem.code,
+            quantity: toSellItem.quantity,
+            price,
+        },
+    });
+
+    await sleep(sellResult.data.cooldown);
+}
+
 async function _recycle(_char: CharacterSchema, _skill: GetAllItemsItemsGetCraftSkillEnum) {
 }
 
@@ -490,7 +547,7 @@ async function moveTo(
     contentType?: GetAllMapsMapsGetContentTypeEnum,
     contentCode?: string,
 ): Promise<CharacterSchema> {
-    const map = (await mapsApi.getAllMapsMapsGet({ contentType, contentCode })).data
+    const map = (await getAllMaps({ contentType, contentCode }))
         .sort((a, b) => distance(a, char) - distance(b, char))[0];
     return await move(char, map.x, map.y);
 }

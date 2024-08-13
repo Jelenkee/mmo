@@ -7,3 +7,5 @@ export const CONFIG: Configuration = new Configuration({
         return fetch(input, Object.assign({}, init, { signal: AbortSignal.timeout(5000) }));
     },
 });
+
+export const MAX_LEVEL = 30;

@@ -6,9 +6,10 @@
         "start": "deno task openapi && deno run --env -A main.ts"
     },
     "imports": {
-        "random": "jsr:@ns/random@^0.1.1",
         "@std/async": "jsr:@std/async@^1.0.3",
-        "delayed": "jsr:@jotsr/delayed@^2.1.1"
+        "delayed": "jsr:@jotsr/delayed@^2.1.1",
+        "random": "jsr:@ns/random@^0.1.1",
+        "memoizee": "https://esm.sh/memoizee@0.4.17"
     },
     "fmt": {
         "indentWidth": 4,
