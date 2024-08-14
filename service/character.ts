@@ -7,12 +7,9 @@ import {
     GetAllItemsItemsGetTypeEnum,
     GetAllMapsMapsGetContentTypeEnum,
     GrandExchangeApi,
-    ItemsApi,
     MapSchema,
-    MonstersApi,
     MonsterSchema,
     MyCharactersApi,
-    ResourcesApi,
     ResourceSchema,
     ResponseError,
     SimpleItemSchema,
@@ -22,13 +19,10 @@ import { CONFIG, MAX_LEVEL } from "../constants.ts";
 import { delay } from "@std/async";
 import { getMostSkilledChar } from "./characters.ts";
 import { getBankItems } from "./bank.ts";
-import { getAllMaps } from "./database.ts";
+import { getAllItems, getAllMaps, getAllMonsters, getAllResources } from "./database.ts";
 
 const myCharactersApi = new MyCharactersApi(CONFIG);
 const charactersApi = new CharactersApi(CONFIG);
-const resourcesApi = new ResourcesApi(CONFIG);
-const itemsApi = new ItemsApi(CONFIG);
-const monstersApi = new MonstersApi(CONFIG);
 const grandExchangeApi = new GrandExchangeApi(CONFIG);
 
 export async function tick(name: string) {
@@ -104,9 +98,9 @@ type Quest = { res?: ResourceSchema; mon?: MonsterSchema; qr: number; drop: Drop
 async function getNextQuest(char: CharacterSchema): Promise<Quest> {
     const bankItems = await getBankItems();
 
-    const resources = await resourcesApi.getAllResourcesResourcesGet({ size: 100 });
+    const resources = await getAllResources();
     const mineableResources: ResourceSchema[] = [];
-    resources.data.filter((res) => {
+    resources.filter((res) => {
         const charLevel = char[(res.skill + "Level") as keyof CharacterSchema] as number;
         if (charLevel >= res.level) {
             mineableResources.push(res);
@@ -122,8 +116,7 @@ async function getNextQuest(char: CharacterSchema): Promise<Quest> {
         });
     });
 
-    const fightableMonsters = (await monstersApi.getAllMonstersMonstersGet({ maxLevel: char.level, size: 100 }))
-        .data
+    const fightableMonsters = (await getAllMonsters({ maxLevel: char.level }))
         .filter((m) => !tooStrongWithFood.has(m.code));
     const monsterQuests: Quest[] = fightableMonsters.sort((a, b) => a.level - b.level).flatMap((mon) => {
         return mon.drops.filter((drop) => drop.rate < 1000).map((drop) => {
@@ -210,7 +203,7 @@ async function prepareForMonster(
         .map((key) => key.slice(attackPrefix.length).toLowerCase())
         .at(0);
 
-    const weaponItems = (await itemsApi.getAllItemsItemsGet({ type: "weapon" })).data
+    const weaponItems = (await getAllItems({ type: "weapon" }))
         .sort((a, b) => b.level - a.level);
     const effectiveWeaponItems = weaponItems
         .filter((wi) => (wi.effects ?? []).some((effect) => effect.name === `attack_${lowestResistance}`));
@@ -221,12 +214,12 @@ async function prepareForMonster(
     );
     char = await equip(char, weapons.at(0), "weapon", "weaponSlot");
 
-    const shieldItems = (await itemsApi.getAllItemsItemsGet({ type: "shield" })).data
+    const shieldItems = (await getAllItems({ type: "shield" }))
         .sort((a, b) => b.level - a.level);
     const shields = shieldItems.flatMap((wi) => bankItems.filter((bi) => wi.code === bi.code));
     char = await equip(char, shields.at(0), "shield", "shieldSlot");
 
-    const ringItems = (await itemsApi.getAllItemsItemsGet({ type: "ring" })).data
+    const ringItems = (await getAllItems({ type: "ring" }))
         .sort((a, b) => b.level - a.level);
     const effectiveRingItems = ringItems
         .filter((ri) => (ri.effects ?? []).some((effect) => effect.name === `dmg_${lowestResistance}`));
@@ -234,7 +227,7 @@ async function prepareForMonster(
     char = await equip(char, rings.at(0), "ring1", "ring1Slot");
     char = await equip(char, rings.at(1), "ring2", "ring2Slot");
 
-    const amuletItems = (await itemsApi.getAllItemsItemsGet({ type: "amulet" })).data
+    const amuletItems = (await getAllItems({ type: "amulet" }))
         .sort((a, b) => b.level - a.level);
     const effectiveAmuletItems = amuletItems
         .filter((ai) => (ai.effects ?? []).some((effect) => effect.name === `dmg_${lowestResistance}`));
@@ -244,7 +237,7 @@ async function prepareForMonster(
     char = await equip(char, amulets.at(0), "amulet", "amuletSlot");
 
     if (withFood) {
-        const foodItems = (await itemsApi.getAllItemsItemsGet({ type: "consumable" })).data
+        const foodItems = (await getAllItems({ type: "consumable" }))
             .sort((a, b) => b.level - a.level);
         const effectiveFoodItems = foodItems
             .filter((fi) => (fi.effects ?? []).some((effect) => effect.name === `boost_dmg_${lowestResistance}`));
@@ -269,7 +262,7 @@ async function prepareForMonster(
         { type: "boots", slot: "boots", charSlot: "bootsSlot" },
     ];
     for (const gearType of gearTypes) {
-        const gearItems = (await itemsApi.getAllItemsItemsGet({ type: gearType.type })).data
+        const gearItems = (await getAllItems({ type: gearType.type }))
             .sort((a, b) => b.level - a.level);
         const effectiveGearItems = gearItems
             .filter((gi) => (gi.effects ?? []).some((effect) => effect.name === `res_${highestAttack}`));
@@ -329,11 +322,10 @@ async function equip(
 }
 
 async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillEnum) {
-    const craftableItems = (await itemsApi.getAllItemsItemsGet({
+    const craftableItems = await getAllItems({
         craftSkill: skill,
         maxLevel: char[(skill + "Level") as keyof CharacterSchema] as number,
-        size: 100,
-    })).data;
+    });
     const bankItems = await getBankItems();
 
     craftableItems.sort((a, b) => {
@@ -448,10 +440,9 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
 }
 
 async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillEnum) {
-    const sellableItems = (await itemsApi.getAllItemsItemsGet({
+    const sellableItems = (await getAllItems({
         craftSkill: skill,
-        size: 100,
-    })).data.sort((a, b) => a.level - b.level);
+    })).sort((a, b) => a.level - b.level);
     const bankItems = await getBankItems();
     const toSellItem = sellableItems
         .map((item) => ({ code: item.code, quantity: Math.floor(getBankQuantity(bankItems, item.code) / 5) }))
@@ -518,7 +509,7 @@ async function deposit(
     type: GetAllItemsItemsGetTypeEnum,
 ): Promise<CharacterSchema> {
     char = await moveTo(char, "bank");
-    const items = (await itemsApi.getAllItemsItemsGet({ type, size: 100 })).data.map((item) => item.code);
+    const items = (await getAllItems({ type })).map((item) => item.code);
 
     for (const slot of (char.inventory ?? [])) {
         if (items.includes(slot.code)) {
