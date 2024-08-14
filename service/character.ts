@@ -27,7 +27,7 @@ const grandExchangeApi = new GrandExchangeApi(CONFIG);
 
 export async function tick(name: string) {
     try {
-        let char = await getChar(name);
+        const char = await getChar(name);
         const cooling = hasCooldown(char);
 
         if (cooling) {
@@ -35,7 +35,7 @@ export async function tick(name: string) {
             return;
         }
 
-        char = await depositResourcesIfNecessary(char);
+        await depositResourcesIfNecessary(char);
 
         for (const skill of Object.values(GetAllItemsItemsGetCraftSkillEnum)) {
             const skilledChar = getMostSkilledChar(skill);
@@ -65,7 +65,6 @@ export async function tick(name: string) {
             }
         }
 
-        char = await getChar(name);
         const quest = await getNextQuest(char);
         if (quest.mon) {
             await fight(char, quest.mon);
@@ -134,10 +133,10 @@ async function getNextQuest(char: CharacterSchema): Promise<Quest> {
 }
 
 async function gather(char: CharacterSchema, resource: ResourceSchema) {
-    char = await moveTo(char, "resource", resource.code);
+    await moveTo(char, "resource", resource.code);
 
     const gatherResult = await myCharactersApi.actionGatheringMyNameActionGatheringPost({ name: char.name });
-    await sleep(gatherResult.data.cooldown);
+    await sleepAndRefresh(char, gatherResult.data);
 }
 
 async function fight(char: CharacterSchema, monster: MonsterSchema) {
@@ -147,7 +146,7 @@ async function fight(char: CharacterSchema, monster: MonsterSchema) {
     char = await prepareForMonster(monster, char, bankItems, needFood);
     const hasFood = char.consumable1SlotQuantity > 0 || char.consumable2SlotQuantity > 0;
 
-    char = await moveTo(char, "monster", monster.code);
+    await moveTo(char, "monster", monster.code);
 
     const battleResult = await myCharactersApi.actionFightMyNameActionFightPost({ name: char.name });
     if (battleResult.data.fight.result === "lose") {
@@ -157,7 +156,7 @@ async function fight(char: CharacterSchema, monster: MonsterSchema) {
             tooStrongWithoutFood.add(monster.code);
         }
     }
-    await sleep(battleResult.data.cooldown);
+    await sleepAndRefresh(char, battleResult.data);
 }
 
 const tooStrongWithoutFood: Set<string> = new Set();
@@ -212,20 +211,20 @@ async function prepareForMonster(
     const weapons = effectiveWeaponItems.concat(normalWeaponItems).concat(weaponItems).flatMap((wi) =>
         bankItems.filter((bi) => wi.code === bi.code)
     );
-    char = await equip(char, weapons.at(0), "weapon", "weaponSlot");
+    await equip(char, weapons.at(0), "weapon", "weaponSlot");
 
     const shieldItems = (await getAllItems({ type: "shield" }))
         .sort((a, b) => b.level - a.level);
     const shields = shieldItems.flatMap((wi) => bankItems.filter((bi) => wi.code === bi.code));
-    char = await equip(char, shields.at(0), "shield", "shieldSlot");
+    await equip(char, shields.at(0), "shield", "shieldSlot");
 
     const ringItems = (await getAllItems({ type: "ring" }))
         .sort((a, b) => b.level - a.level);
     const effectiveRingItems = ringItems
         .filter((ri) => (ri.effects ?? []).some((effect) => effect.name === `dmg_${lowestResistance}`));
     const rings = effectiveRingItems.concat(ringItems).flatMap((wi) => bankItems.filter((bi) => wi.code === bi.code));
-    char = await equip(char, rings.at(0), "ring1", "ring1Slot");
-    char = await equip(char, rings.at(1), "ring2", "ring2Slot");
+    await equip(char, rings.at(0), "ring1", "ring1Slot");
+    await equip(char, rings.at(1), "ring2", "ring2Slot");
 
     const amuletItems = (await getAllItems({ type: "amulet" }))
         .sort((a, b) => b.level - a.level);
@@ -234,7 +233,7 @@ async function prepareForMonster(
     const amulets = effectiveAmuletItems.concat(amuletItems).flatMap((wi) =>
         bankItems.filter((bi) => wi.code === bi.code)
     );
-    char = await equip(char, amulets.at(0), "amulet", "amuletSlot");
+    await equip(char, amulets.at(0), "amulet", "amuletSlot");
 
     if (withFood) {
         const foodItems = (await getAllItems({ type: "consumable" }))
@@ -247,8 +246,8 @@ async function prepareForMonster(
             );
         const foods = effectiveFoodItems.concat(hpFoodItems).concat(foodItems)
             .flatMap((fi) => bankItems.filter((bi) => fi.code === bi.code));
-        char = await equip(char, foods.at(0), "consumable1", "consumable1Slot");
-        char = await equip(char, foods.at(1), "consumable2", "consumable2Slot");
+        await equip(char, foods.at(0), "consumable1", "consumable1Slot");
+        await equip(char, foods.at(1), "consumable2", "consumable2Slot");
     }
 
     const gearTypes: {
@@ -269,7 +268,7 @@ async function prepareForMonster(
         const gears = effectiveGearItems.concat(gearItems).flatMap((gi) =>
             bankItems.filter((bi) => gi.code === bi.code)
         );
-        char = await equip(char, gears.at(0), gearType.slot, gearType.charSlot);
+        await equip(char, gears.at(0), gearType.slot, gearType.charSlot);
     }
 
     return char;
@@ -280,32 +279,32 @@ async function equip(
     item: SimpleItemSchema | undefined,
     slot: UnequipSchemaSlotEnum,
     charSlot: keyof CharacterSchema,
-): Promise<CharacterSchema> {
+) {
     if (item && char[charSlot] !== item.code) {
-        char = await moveTo(char, "bank");
+        await moveTo(char, "bank");
         if (char[charSlot]) {
             const unequipResult = await myCharactersApi.actionUnequipItemMyNameActionUnequipPost({
                 name: char.name,
                 unequipSchema: { slot },
             });
-            await sleep(unequipResult.data.cooldown);
+            await sleepAndRefresh(char, unequipResult.data);
             const depositResult = await myCharactersApi.actionDepositBankMyNameActionBankDepositPost({
                 name: char.name,
                 simpleItemSchema: { code: unequipResult.data.item.code, quantity: 1 },
             });
-            await sleep(depositResult.data.cooldown);
+            await sleepAndRefresh(char, depositResult.data);
         }
         const withdrawResult = await myCharactersApi.actionWithdrawBankMyNameActionBankWithdrawPost({
             name: char.name,
             simpleItemSchema: { code: item.code, quantity: 1 },
         });
-        await sleep(withdrawResult.data.cooldown);
+        await sleepAndRefresh(char, withdrawResult.data);
         try {
             const equipResult = await myCharactersApi.actionEquipItemMyNameActionEquipPost({
                 name: char.name,
                 equipSchema: { code: withdrawResult.data.item.code, slot },
             });
-            await sleep(equipResult.data.cooldown);
+            await sleepAndRefresh(char, equipResult.data);
         } catch (error) {
             if (error instanceof ResponseError) {
                 if (error.response.status === 485) {
@@ -318,7 +317,6 @@ async function equip(
             }
         }
     }
-    return await getChar(char.name);
 }
 
 async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillEnum) {
@@ -388,14 +386,14 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
         return;
     }
 
-    char = await moveTo(char, "bank");
+    await moveTo(char, "bank");
     for (const item of target.ingredients) {
         try {
             const fetchResult = await myCharactersApi.actionWithdrawBankMyNameActionBankWithdrawPost({
                 name: char.name,
                 simpleItemSchema: item,
             });
-            await sleep(fetchResult.data.cooldown);
+            await sleepAndRefresh(char, fetchResult.data);
         } catch (error) {
             if (error instanceof ResponseError) {
                 if (error.response.status === 461) {
@@ -411,15 +409,15 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
         }
     }
 
-    char = await moveTo(char, "workshop", skill);
+    await moveTo(char, "workshop", skill);
 
     const craftResult = await myCharactersApi.actionCraftingMyNameActionCraftingPost({
         name: char.name,
         craftingSchema: { code: target.code, quantity: target.quantity },
     });
-    await sleep(craftResult.data.cooldown);
+    await sleepAndRefresh(char, craftResult.data);
 
-    char = await moveTo(char, "bank");
+    await moveTo(char, "bank");
 
     for (const item of craftResult.data.details.items) {
         try {
@@ -427,7 +425,7 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
                 name: char.name,
                 simpleItemSchema: item,
             });
-            await sleep(deposit.data.cooldown);
+            await sleepAndRefresh(char, deposit.data);
         } catch (error) {
             if (error instanceof ResponseError && error.response.status === 461) {
                 console.log(char.name, item.code, 461);
@@ -436,7 +434,6 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
             throw error;
         }
     }
-    return;
 }
 
 async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillEnum) {
@@ -455,13 +452,13 @@ async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillE
     if (freeSlots === 0 || totalItems + toSellItem.quantity >= char.inventoryMaxItems) {
         return;
     }
-    char = await moveTo(char, "bank");
+    await moveTo(char, "bank");
     const withdrawResult = await myCharactersApi.actionWithdrawBankMyNameActionBankWithdrawPost({
         name: char.name,
         simpleItemSchema: toSellItem,
     });
-    await sleep(withdrawResult.data.cooldown);
-    char = await moveTo(char, "grand_exchange");
+    await sleepAndRefresh(char, withdrawResult.data);
+    await moveTo(char, "grand_exchange");
     const price = (await grandExchangeApi.getGeItemGeCodeGet({ code: toSellItem.code })).data.sellPrice;
     if (price == null) {
         return;
@@ -475,40 +472,37 @@ async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillE
         },
     });
 
-    await sleep(sellResult.data.cooldown);
+    await sleepAndRefresh(char, sellResult.data);
 }
 
 async function _recycle(_char: CharacterSchema, _skill: GetAllItemsItemsGetCraftSkillEnum) {
 }
 
-async function move(char: CharacterSchema, x: number, y: number): Promise<CharacterSchema> {
+async function move(char: CharacterSchema, x: number, y: number) {
     if (char.x == x && char.y == y) {
-        return char;
+        return;
     }
     const movement = await myCharactersApi.actionMoveMyNameActionMovePost({
         name: char.name,
         destinationSchema: { x, y },
     });
-    //TODO update char coords
-
-    await sleep(movement.data.cooldown);
-    return await getChar(char.name);
+    await sleepAndRefresh(char, movement.data);
 }
 
-async function depositResourcesIfNecessary(char: CharacterSchema): Promise<CharacterSchema> {
+async function depositResourcesIfNecessary(char: CharacterSchema) {
     const totalItems = char.inventory?.map((slot) => slot.quantity).reduce((a, c) => a + c, 0) ?? 0;
     const freeSlots = char.inventory?.filter((slot) => !slot.code).length ?? 0;
     if (totalItems + 5 < char.inventoryMaxItems && freeSlots > 3) {
         return char;
     }
-    return await deposit(char, "resource");
+    await deposit(char, "resource");
 }
 
 async function deposit(
     char: CharacterSchema,
     type: GetAllItemsItemsGetTypeEnum,
-): Promise<CharacterSchema> {
-    char = await moveTo(char, "bank");
+) {
+    await moveTo(char, "bank");
     const items = (await getAllItems({ type })).map((item) => item.code);
 
     for (const slot of (char.inventory ?? [])) {
@@ -517,30 +511,24 @@ async function deposit(
                 name: char.name,
                 simpleItemSchema: slot,
             });
-            await sleep(deposit.data.cooldown);
+            await sleepAndRefresh(char, deposit.data);
         }
     }
-    const gold = await myCharactersApi.actionDepositBankGoldMyNameActionBankDepositGoldPost({
+    const goldResult = await myCharactersApi.actionDepositBankGoldMyNameActionBankDepositGoldPost({
         name: char.name,
         depositWithdrawGoldSchema: { quantity: char.gold },
     });
-    await sleep(gold.data.cooldown);
-
-    return getChar(char.name);
-}
-
-async function _refresh(_char: CharacterSchema) {
-    // TODO
+    await sleepAndRefresh(char, goldResult.data);
 }
 
 async function moveTo(
     char: CharacterSchema,
     contentType?: GetAllMapsMapsGetContentTypeEnum,
     contentCode?: string,
-): Promise<CharacterSchema> {
+) {
     const map = (await getAllMaps({ contentType, contentCode }))
         .sort((a, b) => distance(a, char) - distance(b, char))[0];
-    return await move(char, map.x, map.y);
+    await move(char, map.x, map.y);
 }
 
 function distance(map: MapSchema, char: CharacterSchema): number {
@@ -554,8 +542,20 @@ function getBankQuantity(bankItems: SimpleItemSchema[], itemCode: string) {
     return item == null ? 0 : item.quantity;
 }
 
+async function sleepAndRefresh(char: CharacterSchema, result: {
+    cooldown: CooldownSchema;
+    character: CharacterSchema;
+}) {
+    await sleep(result.cooldown);
+    await refresh(char, result.character);
+}
+
 async function sleep(cooldown: CooldownSchema) {
     await delay(cooldown.remainingSeconds * 1000 + 100);
+}
+
+async function refresh(char: CharacterSchema, updatedChar?: CharacterSchema) {
+    Object.assign(char, updatedChar ?? await getChar(char.name));
 }
 
 function hasCooldown(char: CharacterSchema): boolean {

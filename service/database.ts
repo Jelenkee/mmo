@@ -22,8 +22,6 @@ export const getAllMaps = memo(async (params?: GetAllMapsMapsGetRequest) => {
 });
 
 export const getAllItems = memo(async (params?: GetAllItemsItemsGetRequest) => {
-    console.log(params);
-
     return await fetchAllItems((fetchParams) => itemsApi.getAllItemsItemsGet(Object.assign({}, params, fetchParams)));
 });
 
@@ -39,7 +37,7 @@ export const getAllMonsters = memo(async (params?: GetAllMonstersMonstersGetRequ
     );
 });
 
-function memo<P, T>(func: (params?: P) => Promise<T>, maxAge?:number) {
+function memo<P, T>(func: (params?: P) => Promise<T>, maxAge?: number) {
     return _memoizee(async (params?: P) => await func(params), {
         promise: true,
         maxAge: maxAge ?? 1000 * 60 * 30,
