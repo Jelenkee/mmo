@@ -50,17 +50,15 @@ export async function tick(name: string) {
             }
         }
 
-        for (
-            const skill of [
-                GetAllItemsItemsGetCraftSkillEnum.Gearcrafting,
-                GetAllItemsItemsGetCraftSkillEnum.Jewelrycrafting,
-                GetAllItemsItemsGetCraftSkillEnum.Weaponcrafting,
-            ]
-        ) {
+        for (const skill of Object.values(GetAllItemsItemsGetCraftSkillEnum)) {
             const skilledChar = getMostSkilledChar(skill);
             if (skilledChar === name && char[(skill + "Level") as keyof CharacterSchema] as number < MAX_LEVEL) {
-                if (Math.random() <= 0.2) {
-                    await sell(char, skill);
+                const t1 = new Date().getTime();
+                await sell(char, skill);
+                const t2 = new Date().getTime();
+                const duration = t2 - t1;
+                if (duration > 10_000) {
+                    return;
                 }
             }
         }
@@ -333,16 +331,7 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
         return aQ - bQ;
     });
 
-    let minQuantity = 5;
-    if (skill === GetAllItemsItemsGetCraftSkillEnum.Cooking) {
-        minQuantity = 100;
-    } else if (
-        skill === GetAllItemsItemsGetCraftSkillEnum.Woodcutting || skill === GetAllItemsItemsGetCraftSkillEnum.Mining
-    ) {
-        minQuantity = 50;
-    } else if (skill === GetAllItemsItemsGetCraftSkillEnum.Jewelrycrafting) {
-        minQuantity = 10;
-    }
+    const minQuantity = getMinQuantityInBank(skill);
 
     const target = craftableItems
         .map((item) => {
@@ -437,11 +426,16 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
 }
 
 async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillEnum) {
-    const sellableItems = (await getAllItems({
+    const craftableItems = (await getAllItems({
         craftSkill: skill,
+        maxLevel: char[(skill + "Level") as keyof CharacterSchema] as number,
     })).sort((a, b) => a.level - b.level);
     const bankItems = await getBankItems();
-    const toSellItem = sellableItems
+    const shouldSell = craftableItems.every((i) => getBankQuantity(bankItems, i.code) >= getMinQuantityInBank(skill));
+    if (!shouldSell) {
+        return;
+    }
+    const toSellItem = craftableItems
         .map((item) => ({ code: item.code, quantity: Math.floor(getBankQuantity(bankItems, item.code) / 5) }))
         .filter((i) => i.quantity > 0)[0];
     if (toSellItem == null) {
@@ -475,7 +469,18 @@ async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillE
     await sleepAndRefresh(char, sellResult.data);
 }
 
-async function _recycle(_char: CharacterSchema, _skill: GetAllItemsItemsGetCraftSkillEnum) {
+function getMinQuantityInBank(skill: GetAllItemsItemsGetCraftSkillEnum) {
+    let minQuantity = 5;
+    if (skill === GetAllItemsItemsGetCraftSkillEnum.Cooking) {
+        minQuantity = 100;
+    } else if (
+        skill === GetAllItemsItemsGetCraftSkillEnum.Woodcutting || skill === GetAllItemsItemsGetCraftSkillEnum.Mining
+    ) {
+        minQuantity = 50;
+    } else if (skill === GetAllItemsItemsGetCraftSkillEnum.Jewelrycrafting) {
+        minQuantity = 10;
+    }
+    return minQuantity;
 }
 
 async function move(char: CharacterSchema, x: number, y: number) {
