@@ -234,6 +234,8 @@ async function prepareForMonster(
     await equip(char, amulets.at(0), "amulet", "amuletSlot");
 
     if (withFood) {
+        await unequip(char, "consumable1", "consumable1Slot");
+        await unequip(char, "consumable2", "consumable2Slot");
         const foodItems = (await getAllItems({ type: "consumable" }))
             .sort((a, b) => b.level - a.level);
         const effectiveFoodItems = foodItems
@@ -280,40 +282,32 @@ async function equip(
 ) {
     if (item && char[charSlot] !== item.code) {
         await moveTo(char, "bank");
-        if (char[charSlot]) {
-            const unequipResult = await myCharactersApi.actionUnequipItemMyNameActionUnequipPost({
-                name: char.name,
-                unequipSchema: { slot },
-            });
-            await sleepAndRefresh(char, unequipResult.data);
-            const depositResult = await myCharactersApi.actionDepositBankMyNameActionBankDepositPost({
-                name: char.name,
-                simpleItemSchema: { code: unequipResult.data.item.code, quantity: 1 },
-            });
-            await sleepAndRefresh(char, depositResult.data);
-        }
+        await unequip(char, slot, charSlot);
         const withdrawResult = await myCharactersApi.actionWithdrawBankMyNameActionBankWithdrawPost({
             name: char.name,
             simpleItemSchema: { code: item.code, quantity: 1 },
         });
         await sleepAndRefresh(char, withdrawResult.data);
-        try {
-            const equipResult = await myCharactersApi.actionEquipItemMyNameActionEquipPost({
-                name: char.name,
-                equipSchema: { code: withdrawResult.data.item.code, slot },
-            });
-            await sleepAndRefresh(char, equipResult.data);
-        } catch (error) {
-            if (error instanceof ResponseError) {
-                if (error.response.status === 485) {
-                    console.log("without", withdrawResult.data.item.code);
-                } else {
-                    throw error;
-                }
-            } else {
-                throw error;
-            }
-        }
+        const equipResult = await myCharactersApi.actionEquipItemMyNameActionEquipPost({
+            name: char.name,
+            equipSchema: { code: withdrawResult.data.item.code, slot },
+        });
+        await sleepAndRefresh(char, equipResult.data);
+    }
+}
+
+async function unequip(char: CharacterSchema, slot: UnequipSchemaSlotEnum, charSlot: keyof CharacterSchema) {
+    if (char[charSlot]) {
+        const unequipResult = await myCharactersApi.actionUnequipItemMyNameActionUnequipPost({
+            name: char.name,
+            unequipSchema: { slot },
+        });
+        await sleepAndRefresh(char, unequipResult.data);
+        const depositResult = await myCharactersApi.actionDepositBankMyNameActionBankDepositPost({
+            name: char.name,
+            simpleItemSchema: { code: unequipResult.data.item.code, quantity: 1 },
+        });
+        await sleepAndRefresh(char, depositResult.data);
     }
 }
 
