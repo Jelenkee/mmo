@@ -17,9 +17,12 @@ const itemsApi = new ItemsApi(CONFIG);
 const resourcesApi = new ResourcesApi(CONFIG);
 const monstersApi = new MonstersApi(CONFIG);
 
-export const getAllMaps = memo(async (params?: GetAllMapsMapsGetRequest) => {
+/*export const getAllMaps = memo(async (params?: GetAllMapsMapsGetRequest) => {
     return await fetchAllItems((fetchParams) => mapsApi.getAllMapsMapsGet(Object.assign({}, params, fetchParams)));
-});
+});*/
+export async function getAllMaps(params?: GetAllMapsMapsGetRequest) {
+    return await fetchAllItems((fetchParams) => mapsApi.getAllMapsMapsGet(Object.assign({}, params, fetchParams)));
+}
 
 export const getAllItems = memo(async (params?: GetAllItemsItemsGetRequest) => {
     return await fetchAllItems((fetchParams) => itemsApi.getAllItemsItemsGet(Object.assign({}, params, fetchParams)));

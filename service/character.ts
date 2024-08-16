@@ -95,14 +95,11 @@ type Quest = { res?: ResourceSchema; mon?: MonsterSchema; qr: number; drop: Drop
 async function getNextQuest(char: CharacterSchema): Promise<Quest> {
     const bankItems = await getBankItems();
 
-    const resources = await getAllResources();
-    const mineableResources: ResourceSchema[] = [];
-    resources.filter((res) => {
-        const charLevel = char[(res.skill + "Level") as keyof CharacterSchema] as number;
-        if (charLevel >= res.level) {
-            mineableResources.push(res);
-        }
-    });
+    const mineableResources = (await getAllResources())
+        .filter((res) => {
+            const charLevel = char[(res.skill + "Level") as keyof CharacterSchema] as number;
+            return charLevel >= res.level;
+        });
     const resourceQuests: Quest[] = mineableResources.sort((a, b) => b.level - a.level).flatMap((res) => {
         return res.drops.filter((drop) => drop.rate < 1000).map((drop) => {
             return {
@@ -113,8 +110,11 @@ async function getNextQuest(char: CharacterSchema): Promise<Quest> {
         });
     });
 
+    const monsterMaps = await getAllMaps({ contentType: "monster" });
+    const availableMonsters = monsterMaps.map((map) => map.content?.code).filter(Boolean);
     const fightableMonsters = (await getAllMonsters({ maxLevel: char.level }))
-        .filter((m) => !tooStrongWithFood.has(m.code));
+        .filter((mon) => !tooStrongWithFood.has(mon.code))
+        .filter((mon) => availableMonsters.includes(mon.code));
     const monsterQuests: Quest[] = fightableMonsters.sort((a, b) => a.level - b.level).flatMap((mon) => {
         return mon.drops.filter((drop) => drop.rate < 1000).map((drop) => {
             return {
@@ -222,7 +222,7 @@ async function prepareForMonster(
         .filter((ri) => (ri.effects ?? []).some((effect) => effect.name === `dmg_${lowestResistance}`));
     const rings = effectiveRingItems.concat(ringItems).flatMap((wi) => bankItems.filter((bi) => wi.code === bi.code));
     await equip(char, rings.at(0), "ring1", "ring1Slot");
-    await equip(char, rings.at(1), "ring2", "ring2Slot");
+    await equip(char, rings.at(1) ?? rings.at(0), "ring2", "ring2Slot");
 
     const amuletItems = (await getAllItems({ type: "amulet" }))
         .sort((a, b) => b.level - a.level);
@@ -376,6 +376,7 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
     }
 
     await moveTo(char, "bank");
+    await deposit(char, "resource");
     for (const item of target.ingredients) {
         try {
             const fetchResult = await myCharactersApi.actionWithdrawBankMyNameActionBankWithdrawPost({
@@ -519,11 +520,13 @@ async function deposit(
             await sleepAndRefresh(char, deposit.data);
         }
     }
-    const goldResult = await myCharactersApi.actionDepositBankGoldMyNameActionBankDepositGoldPost({
-        name: char.name,
-        depositWithdrawGoldSchema: { quantity: char.gold },
-    });
-    await sleepAndRefresh(char, goldResult.data);
+    if (char.gold > 0) {
+        const goldResult = await myCharactersApi.actionDepositBankGoldMyNameActionBankDepositGoldPost({
+            name: char.name,
+            depositWithdrawGoldSchema: { quantity: char.gold },
+        });
+        await sleepAndRefresh(char, goldResult.data);
+    }
 }
 
 async function moveTo(
