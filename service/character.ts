@@ -17,9 +17,11 @@ import {
 } from "../api/index.ts";
 import { CONFIG, MAX_LEVEL } from "../constants.ts";
 import { delay } from "@std/async";
+import { distinctBy } from "@std/collections";
 import { getMostSkilledChar } from "./characters.ts";
 import { getBankItems } from "./bank.ts";
 import { getAllItems, getAllMaps, getAllMonsters, getAllResources } from "./database.ts";
+import { getLogger } from "./log.ts";
 
 const myCharactersApi = new MyCharactersApi(CONFIG);
 const charactersApi = new CharactersApi(CONFIG);
@@ -28,12 +30,7 @@ const grandExchangeApi = new GrandExchangeApi(CONFIG);
 export async function tick(name: string) {
     try {
         const char = await getChar(name);
-        const cooling = hasCooldown(char);
-
-        if (cooling) {
-            console.log(name, "is cooling down");
-            return;
-        }
+        await delay(getRemainingCooldown(char));
 
         await depositResourcesIfNecessary(char);
 
@@ -69,21 +66,15 @@ export async function tick(name: string) {
         } else if (quest.res) {
             await gather(char, quest.res);
         } else {
-            console.log("No quest found");
+            getLogger(char).warn("No quest found");
         }
     } catch (error) {
         if (error instanceof ResponseError) {
-            console.error(
-                name,
-                error.response.status,
-                error.message,
-                await error.response.json().catch((_) => error.response.text()),
-                //error.stack,
-            );
-        } else {
-            console.error("unexpected");
-            console.error(error);
+            error.message = await error.response.text();
+            //@ts-ignore dont care about response
+            error.response = { status: error.response.status };
         }
+        getLogger(name).error(error);
     }
 }
 
@@ -125,19 +116,40 @@ async function getNextQuest(char: CharacterSchema): Promise<Quest> {
         });
     });
 
-    const quests = resourceQuests.concat(monsterQuests).sort((a, b) => a.qr - b.qr);
+    const quests = distinctBy(
+        resourceQuests.concat(monsterQuests).sort((a, b) => a.qr - b.qr),
+        (q) => q.mon?.code ?? q.res?.code ?? "_",
+    );
+    getLogger(char).debug({
+        quests: quests.map((q) => ({ code: q.mon?.code ?? q.res?.code ?? "_", drop: q.drop.code, quantity: q.qr })),
+    });
+    const playerHash = Math.abs(
+        Array.from(Array(char.name.length))
+            .map((i) => char.name.charCodeAt(i))
+            .reduce((p, c) => {
+                const $ = ((p << 5) - p) + c;
+                return $ & $;
+            }, 0),
+    );
 
-    return quests[0];
+    const equalQuests = quests.filter((q) => q.qr === quests[0].qr);
+
+    return equalQuests[playerHash % equalQuests.length];
 }
 
 async function gather(char: CharacterSchema, resource: ResourceSchema) {
+    getLogger(char).info(`Start gathering ${resource.code}`);
     await moveTo(char, "resource", resource.code);
 
     const gatherResult = await myCharactersApi.actionGatheringMyNameActionGatheringPost({ name: char.name });
+    getLogger(char).info(
+        `Gathered ${gatherResult.data.details.items.map((i) => `${i.quantity} ${i.code}`).join(", ")}`,
+    );
     await sleepAndRefresh(char, gatherResult.data);
 }
 
 async function fight(char: CharacterSchema, monster: MonsterSchema) {
+    getLogger(char).info(`Start fighting ${monster.code}`);
     const bankItems = await getBankItems();
 
     const needFood = tooStrongWithoutFood.has(monster.code);
@@ -147,6 +159,7 @@ async function fight(char: CharacterSchema, monster: MonsterSchema) {
     await moveTo(char, "monster", monster.code);
 
     const battleResult = await myCharactersApi.actionFightMyNameActionFightPost({ name: char.name });
+    getLogger(char).info(`Fought ${monster.code}. Result: ${battleResult.data.fight.result}`);
     if (battleResult.data.fight.result === "lose") {
         if (hasFood) {
             tooStrongWithFood.add(monster.code);
@@ -207,13 +220,15 @@ async function prepareForMonster(
     const normalWeaponItems = weaponItems
         .filter((wi) => !(wi.effects ?? []).some((effect) => effect.name === `attack_${highestResistance}`));
     const weapons = effectiveWeaponItems.concat(normalWeaponItems).concat(weaponItems).flatMap((wi) =>
-        bankItems.filter((bi) => wi.code === bi.code)
+        bankItems.concat([{ code: char.weaponSlot, quantity: 1 }]).filter((bi) => wi.code === bi.code)
     );
     await equip(char, weapons.at(0), "weapon", "weaponSlot");
 
     const shieldItems = (await getAllItems({ type: "shield" }))
         .sort((a, b) => b.level - a.level);
-    const shields = shieldItems.flatMap((wi) => bankItems.filter((bi) => wi.code === bi.code));
+    const shields = shieldItems.flatMap((wi) =>
+        bankItems.concat([{ code: char.shieldSlot, quantity: 1 }]).filter((bi) => wi.code === bi.code)
+    );
     await equip(char, shields.at(0), "shield", "shieldSlot");
 
     const ringItems = (await getAllItems({ type: "ring" }))
@@ -229,7 +244,7 @@ async function prepareForMonster(
     const effectiveAmuletItems = amuletItems
         .filter((ai) => (ai.effects ?? []).some((effect) => effect.name === `dmg_${lowestResistance}`));
     const amulets = effectiveAmuletItems.concat(amuletItems).flatMap((wi) =>
-        bankItems.filter((bi) => wi.code === bi.code)
+        bankItems.concat([{ code: char.amuletSlot, quantity: 1 }]).filter((bi) => wi.code === bi.code)
     );
     await equip(char, amulets.at(0), "amulet", "amuletSlot");
 
@@ -266,7 +281,9 @@ async function prepareForMonster(
         const effectiveGearItems = gearItems
             .filter((gi) => (gi.effects ?? []).some((effect) => effect.name === `res_${highestAttack}`));
         const gears = effectiveGearItems.concat(gearItems).flatMap((gi) =>
-            bankItems.filter((bi) => gi.code === bi.code)
+            bankItems.concat([{ code: char[gearType.charSlot] as string, quantity: 1 }]).filter((bi) =>
+                gi.code === bi.code
+            )
         );
         await equip(char, gears.at(0), gearType.slot, gearType.charSlot);
     }
@@ -292,6 +309,7 @@ async function equip(
             name: char.name,
             equipSchema: { code: withdrawResult.data.item.code, slot },
         });
+        getLogger(char).debug(`Equipped ${equipResult.data.item.code} in ${equipResult.data.slot}`);
         await sleepAndRefresh(char, equipResult.data);
     }
 }
@@ -366,8 +384,10 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
         .at(0);
 
     if (target == null) {
+        getLogger(char).debug(`No item found for crafing`);
         return;
     }
+    getLogger(char).info(`Start crafting ${target.quantity} ${target.code}`);
 
     await moveTo(char, "bank");
     await deposit(char, "resource");
@@ -381,11 +401,11 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
         } catch (error) {
             if (error instanceof ResponseError) {
                 if (error.response.status === 461) {
-                    console.log(char.name, item.code, 461);
+                    getLogger(char).warn(`Withdraw conflict 461: ${item.code}`);
                     return;
                 } else if (error.response.status === 404) {
                     // someone was faster
-                    console.log(char.name, item.code, 404);
+                    getLogger(char).warn(`Withdraw conflict 404: ${item.code}`);
                     return;
                 }
             }
@@ -399,6 +419,7 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
         name: char.name,
         craftingSchema: { code: target.code, quantity: target.quantity },
     });
+    getLogger(char).info(`Crafted ${craftResult.data.details.items.map((i) => `${i.quantity} ${i.code}`).join(", ")}`);
     await sleepAndRefresh(char, craftResult.data);
 
     await moveTo(char, "bank");
@@ -412,7 +433,7 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
             await sleepAndRefresh(char, deposit.data);
         } catch (error) {
             if (error instanceof ResponseError && error.response.status === 461) {
-                console.log(char.name, item.code, 461);
+                getLogger(char).warn(`Deposit conflict 461: ${item.code}`);
                 return;
             }
             throw error;
@@ -434,11 +455,13 @@ async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillE
         .map((item) => ({ code: item.code, quantity: Math.floor(getBankQuantity(bankItems, item.code) / 5) }))
         .filter((i) => i.quantity > 0)[0];
     if (toSellItem == null) {
+        getLogger(char).debug(`No item found for selling`);
         return;
     }
     const totalItems = char.inventory?.map((slot) => slot.quantity).reduce((a, c) => a + c, 0) ?? 0;
     const freeSlots = char.inventory?.filter((slot) => !slot.code).length ?? 0;
     if (freeSlots === 0 || totalItems + toSellItem.quantity >= char.inventoryMaxItems) {
+        getLogger(char).debug(`No space for selling`);
         return;
     }
     await moveTo(char, "bank");
@@ -452,6 +475,7 @@ async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillE
     if (price == null) {
         return;
     }
+    getLogger(char).info(`Start selling ${toSellItem.quantity} ${toSellItem.code}`);
     const sellResult = await myCharactersApi.actionGeSellItemMyNameActionGeSellPost({
         name: char.name,
         gETransactionItemSchema: {
@@ -460,6 +484,9 @@ async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillE
             price,
         },
     });
+    getLogger(char).info(
+        `Sold ${sellResult.data.transaction.quantity} ${sellResult.data.transaction.code} for ${sellResult.data.transaction.price} gold`,
+    );
 
     await sleepAndRefresh(char, sellResult.data);
 }
@@ -486,6 +513,7 @@ async function move(char: CharacterSchema, x: number, y: number) {
         name: char.name,
         destinationSchema: { x, y },
     });
+    getLogger(char).debug(`Moved to (${movement.data.destination.x}, ${movement.data.destination.y})`);
     await sleepAndRefresh(char, movement.data);
 }
 
@@ -502,16 +530,18 @@ async function deposit(
     char: CharacterSchema,
     type: GetAllItemsItemsGetTypeEnum,
 ) {
+    getLogger(char).info("Start depositing");
     await moveTo(char, "bank");
     const items = (await getAllItems({ type })).map((item) => item.code);
 
     for (const slot of (char.inventory ?? [])) {
         if (items.includes(slot.code)) {
-            const deposit = await myCharactersApi.actionDepositBankMyNameActionBankDepositPost({
+            const depositResult = await myCharactersApi.actionDepositBankMyNameActionBankDepositPost({
                 name: char.name,
                 simpleItemSchema: slot,
             });
-            await sleepAndRefresh(char, deposit.data);
+            getLogger(char).info(`Deposited ${depositResult.data.item}`);
+            await sleepAndRefresh(char, depositResult.data);
         }
     }
     if (char.gold > 0) {
@@ -550,6 +580,7 @@ async function sleepAndRefresh(char: CharacterSchema, result: {
 }) {
     await sleep(result.cooldown);
     await refresh(char, result.character);
+    getLogger(char).debug(`Slept for ${result.cooldown} seconds`);
 }
 
 async function sleep(cooldown: CooldownSchema) {
@@ -560,11 +591,11 @@ async function refresh(char: CharacterSchema, updatedChar?: CharacterSchema) {
     Object.assign(char, updatedChar ?? await getChar(char.name));
 }
 
-function hasCooldown(char: CharacterSchema): boolean {
+function getRemainingCooldown(char: CharacterSchema): number {
     const expireDate = char.cooldownExpiration;
     if (expireDate == null) {
-        return false;
+        return 0;
     }
     const diff = expireDate.getTime() - new Date().getTime();
-    return diff > 0;
+    return Math.max(0, diff);
 }
