@@ -47,15 +47,18 @@ export async function tick(name: string) {
             }
         }
 
-        for (const skill of Object.values(GetAllItemsItemsGetCraftSkillEnum)) {
-            const skilledChar = getMostSkilledChar(skill);
-            if (skilledChar === name && char[(skill + "Level") as keyof CharacterSchema] as number < MAX_LEVEL) {
-                const t1 = new Date().getTime();
-                await sell(char, skill);
-                const t2 = new Date().getTime();
-                const duration = t2 - t1;
-                if (duration > 10_000) {
-                    return;
+        const quarter = Math.floor(new Date().getHours() / 6);
+        if (quarter % 2 != 0) {
+            for (const skill of Object.values(GetAllItemsItemsGetCraftSkillEnum)) {
+                const skilledChar = getMostSkilledChar(skill);
+                if (skilledChar === name && char[(skill + "Level") as keyof CharacterSchema] as number < MAX_LEVEL) {
+                    const t1 = new Date().getTime();
+                    await sell(char, skill);
+                    const t2 = new Date().getTime();
+                    const duration = t2 - t1;
+                    if (duration > 10_000) {
+                        return;
+                    }
                 }
             }
         }
@@ -116,10 +119,7 @@ async function getNextQuest(char: CharacterSchema): Promise<Quest> {
         });
     });
 
-    const quests = distinctBy(
-        resourceQuests.concat(monsterQuests).sort((a, b) => a.qr - b.qr),
-        (q) => q.mon?.code ?? q.res?.code ?? "_",
-    );
+    const quests = resourceQuests.concat(monsterQuests).sort((a, b) => a.qr - b.qr);
     getLogger(char).debug({
         quests: quests.map((q) => ({ code: q.mon?.code ?? q.res?.code ?? "_", drop: q.drop.code, quantity: q.qr })),
     });
@@ -132,12 +132,16 @@ async function getNextQuest(char: CharacterSchema): Promise<Quest> {
             }, 0),
     );
 
-    const equalQuests = quests.filter((q) => q.qr === quests[0].qr);
+    const equalQuests = distinctBy(
+        quests.filter((q) => q.qr === quests[0].qr),
+        (q) => q.mon?.code ?? q.res?.code ?? "_",
+    );
 
     return equalQuests[playerHash % equalQuests.length];
 }
 
 async function gather(char: CharacterSchema, resource: ResourceSchema) {
+    // TODO equip tool for better effiency
     getLogger(char).info(`Start gathering ${resource.code}`);
     await moveTo(char, "resource", resource.code);
 
@@ -249,6 +253,7 @@ async function prepareForMonster(
     await equip(char, amulets.at(0), "amulet", "amuletSlot");
 
     if (withFood) {
+        // TODO equip more than one food
         await unequip(char, "consumable1", "consumable1Slot");
         await unequip(char, "consumable2", "consumable2Slot");
         const foodItems = (await getAllItems({ type: "consumable" }))
@@ -540,7 +545,7 @@ async function deposit(
                 name: char.name,
                 simpleItemSchema: slot,
             });
-            getLogger(char).info(`Deposited ${depositResult.data.item}`);
+            getLogger(char).info(`Deposited ${depositResult.data.item.code}`);
             await sleepAndRefresh(char, depositResult.data);
         }
     }
@@ -580,7 +585,7 @@ async function sleepAndRefresh(char: CharacterSchema, result: {
 }) {
     await sleep(result.cooldown);
     await refresh(char, result.character);
-    getLogger(char).debug(`Slept for ${result.cooldown} seconds`);
+    getLogger(char).debug(`Slept for ${result.cooldown.totalSeconds} seconds`);
 }
 
 async function sleep(cooldown: CooldownSchema) {
