@@ -15,4 +15,4 @@ export const CONFIG: Configuration = new Configuration({
     },
 });
 
-export const MAX_LEVEL = 30;
+export const MAX_LEVEL = 35;

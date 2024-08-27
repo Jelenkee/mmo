@@ -463,6 +463,12 @@ async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillE
         getLogger(char).debug(`No item found for selling`);
         return;
     }
+    const { sellPrice: price, maxQuantity } =
+        (await grandExchangeApi.getGeItemGeCodeGet({ code: toSellItem.code })).data;
+    if (price == null) {
+        return;
+    }
+    toSellItem.quantity = Math.min(toSellItem.quantity, maxQuantity);
     const totalItems = char.inventory?.map((slot) => slot.quantity).reduce((a, c) => a + c, 0) ?? 0;
     const freeSlots = char.inventory?.filter((slot) => !slot.code).length ?? 0;
     if (freeSlots === 0 || totalItems + toSellItem.quantity >= char.inventoryMaxItems) {
@@ -476,10 +482,7 @@ async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillE
     });
     await sleepAndRefresh(char, withdrawResult.data);
     await moveTo(char, "grand_exchange");
-    const price = (await grandExchangeApi.getGeItemGeCodeGet({ code: toSellItem.code })).data.sellPrice;
-    if (price == null) {
-        return;
-    }
+
     getLogger(char).info(`Start selling ${toSellItem.quantity} ${toSellItem.code}`);
     const sellResult = await myCharactersApi.actionGeSellItemMyNameActionGeSellPost({
         name: char.name,
@@ -556,6 +559,7 @@ async function deposit(
         });
         await sleepAndRefresh(char, goldResult.data);
     }
+    // TODO expand inventory if nearly full
 }
 
 async function moveTo(
