@@ -9,6 +9,7 @@ import {
     GrandExchangeApi,
     MapSchema,
     MonsterSchema,
+    MyAccountApi,
     MyCharactersApi,
     ResourceSchema,
     ResponseError,
@@ -26,6 +27,7 @@ import { getLogger } from "./log.ts";
 const myCharactersApi = new MyCharactersApi(CONFIG);
 const charactersApi = new CharactersApi(CONFIG);
 const grandExchangeApi = new GrandExchangeApi(CONFIG);
+const myAccountApi = new MyAccountApi(CONFIG);
 
 export async function tick(name: string) {
     try {
@@ -539,7 +541,18 @@ async function deposit(
     type: GetAllItemsItemsGetTypeEnum,
 ) {
     getLogger(char).info("Start depositing");
+
     await moveTo(char, "bank");
+    if (char.gold > 0) {
+        const goldResult = await myCharactersApi.actionDepositBankGoldMyNameActionBankDepositGoldPost({
+            name: char.name,
+            depositWithdrawGoldSchema: { quantity: char.gold },
+        });
+        await sleepAndRefresh(char, goldResult.data);
+    }
+
+    await expandBankIfNecessary(char);
+
     const items = (await getAllItems({ type })).map((item) => item.code);
 
     for (const slot of (char.inventory ?? [])) {
@@ -552,14 +565,34 @@ async function deposit(
             await sleepAndRefresh(char, depositResult.data);
         }
     }
-    if (char.gold > 0) {
-        const goldResult = await myCharactersApi.actionDepositBankGoldMyNameActionBankDepositGoldPost({
-            name: char.name,
-            depositWithdrawGoldSchema: { quantity: char.gold },
-        });
-        await sleepAndRefresh(char, goldResult.data);
+}
+
+async function expandBankIfNecessary(char: CharacterSchema) {
+    const items = await getBankItems();
+    const details = await myAccountApi.getBankDetailsMyBankGet();
+    if (items.length + 1 < details.data.slots) {
+        getLogger(char).debug("Bank has still enough space");
+        return;
     }
-    // TODO expand inventory if nearly full
+    getLogger(char).info("Start expanding bank");
+
+    if (details.data.gold < details.data.nextExpansionCost) {
+        getLogger(char).info("Not enough gold for expanding. Rest a bit");
+        await delay(1000 * 60);
+        return;
+    }
+    await moveTo(char, "bank");
+
+    const withdrawResult = await myCharactersApi.actionWithdrawBankGoldMyNameActionBankWithdrawGoldPost({
+        name: char.name,
+        depositWithdrawGoldSchema: { quantity: details.data.nextExpansionCost },
+    });
+    await sleepAndRefresh(char, withdrawResult.data);
+    const expansionResult = await myCharactersApi.actionBuyBankExpansionMyNameActionBankBuyExpansionPost({
+        name: char.name,
+    });
+    await sleepAndRefresh(char, expansionResult.data);
+    getLogger(char).info(`Expanded bank for ${expansionResult.data.transaction.price} gold`);
 }
 
 async function moveTo(
