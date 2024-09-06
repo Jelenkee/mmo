@@ -21,8 +21,9 @@ import { delay } from "@std/async";
 import { distinctBy } from "@std/collections";
 import { getMostSkilledChar } from "./characters.ts";
 import { getBankItems } from "./bank.ts";
-import { getAllItems, getAllMaps, getAllMonsters, getAllResources } from "./database.ts";
+import { getAllItems, getAllMaps, getAllMonsters, getAllResources, getItem } from "./database.ts";
 import { getLogger } from "./log.ts";
+import { asyncFilter } from "../utils.ts";
 
 const myCharactersApi = new MyCharactersApi(CONFIG);
 const charactersApi = new CharactersApi(CONFIG);
@@ -458,9 +459,10 @@ async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillE
     if (!shouldSell) {
         return;
     }
-    const toSellItem = craftableItems
-        .map((item) => ({ code: item.code, quantity: Math.floor(getBankQuantity(bankItems, item.code) / 5) }))
-        .filter((i) => i.quantity > 0)[0];
+    const toSellItem =
+        (await asyncFilter(craftableItems, async (item) => (await getItem({ code: item.code })).data.ge != null))
+            .map((item) => ({ code: item.code, quantity: Math.floor(getBankQuantity(bankItems, item.code) / 5) }))
+            .filter((i) => i.quantity > 0)[0];
     if (toSellItem == null) {
         getLogger(char).debug(`No item found for selling`);
         return;

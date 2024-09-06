@@ -15,3 +15,14 @@ export async function fetchAllItems<T>(
 
     return items;
 }
+
+export async function asyncFilter<T>(
+    arr: T[],
+    predicate: (value: T, index: number, array: T[]) => Promise<boolean>,
+): Promise<T[]> {
+    return (await Promise.all(arr.map(async (item, i, arr2) => {
+        const success = await predicate(item, i, arr2);
+        return { item, success };
+    }))).filter((t) => t.success)
+        .map((t) => t.item);
+}

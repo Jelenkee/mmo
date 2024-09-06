@@ -3,6 +3,7 @@ import {
     GetAllMapsMapsGetRequest,
     GetAllMonstersMonstersGetRequest,
     GetAllResourcesResourcesGetRequest,
+    GetItemItemsCodeGetRequest,
     ItemsApi,
     MapsApi,
     MonstersApi,
@@ -38,6 +39,10 @@ export const getAllMonsters = memo(async (params?: GetAllMonstersMonstersGetRequ
     return await fetchAllItems((fetchParams) =>
         monstersApi.getAllMonstersMonstersGet(Object.assign({}, params, fetchParams))
     );
+});
+
+export const getItem = memo(async (params?: GetItemItemsCodeGetRequest) => {
+    return await itemsApi.getItemItemsCodeGet(params ?? { code: "foobar__" });
 });
 
 function memo<P, T>(func: (params?: P) => Promise<T>, maxAge?: number) {
