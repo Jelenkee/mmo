@@ -21,7 +21,7 @@ import { delay } from "@std/async";
 import { distinctBy } from "@std/collections";
 import { getMostSkilledChar } from "./characters.ts";
 import { getBankItems } from "./bank.ts";
-import { getAllItems, getAllMaps, getAllMonsters, getAllResources, getItem } from "./database.ts";
+import { getAllItems, getAllMaps, getAllMonsters, getAllResources, getItem, getMonster } from "./database.ts";
 import { getLogger } from "./log.ts";
 import { asyncFilter } from "../utils.ts";
 
@@ -66,6 +66,11 @@ export async function tick(name: string) {
             }
         }
 
+        if (Math.random() < 0.01) {
+            await acceptTask(char);
+        }
+        await checkTask(char);
+
         const quest = await getNextQuest(char);
         if (quest.mon) {
             await fight(char, quest.mon);
@@ -89,8 +94,20 @@ async function getChar(name: string): Promise<CharacterSchema> {
 }
 
 type Quest = { res?: ResourceSchema; mon?: MonsterSchema; qr: number; drop: DropRateSchema };
-async function getNextQuest(char: CharacterSchema): Promise<Quest> {
+async function getNextQuest(char: CharacterSchema): Promise<Pick<Quest, "mon" | "res">> {
     const bankItems = await getBankItems();
+
+    if (char.task.length > 0 && char.taskProgress < char.taskTotal) {
+        if (char.taskType === "monsters") {
+            if (!tooStrongWithFood.has(char.task)) {
+                return {
+                    mon: (await getMonster({ code: char.task })).data,
+                };
+            }
+        } else {
+            getLogger(char).error(`task ${char.taskType} not implemented`);
+        }
+    }
 
     const mineableResources = (await getAllResources())
         .filter((res) => {
@@ -244,7 +261,7 @@ async function prepareForMonster(
         .filter((ri) => (ri.effects ?? []).some((effect) => effect.name === `dmg_${lowestResistance}`));
     const rings = effectiveRingItems.concat(ringItems).flatMap((wi) => bankItems.filter((bi) => wi.code === bi.code));
     await equip(char, rings.at(0), "ring1", "ring1Slot");
-    await equip(char, rings.at(1) ?? rings.at(0), "ring2", "ring2Slot");
+    await equip(char, (rings.at(0)?.quantity ?? 0) > 1 ? rings.at(0) : rings.at(1), "ring2", "ring2Slot");
 
     const amuletItems = (await getAllItems({ type: "amulet" }))
         .sort((a, b) => b.level - a.level);
@@ -335,6 +352,31 @@ async function unequip(char: CharacterSchema, slot: UnequipSchemaSlotEnum, charS
         });
         await sleepAndRefresh(char, depositResult.data);
     }
+}
+
+async function checkTask(char: CharacterSchema) {
+    if (char.task.length === 0) {
+        return;
+    }
+
+    if (char.taskProgress >= char.taskTotal) {
+        await deposit(char, "resource");
+        await moveTo(char, "tasks_master");
+        const taskResult = await myCharactersApi.actionCompleteTaskMyNameActionTaskCompletePost({ name: char.name });
+        getLogger(char).info(`Completed task ${char.taskTotal} ${char.task}`);
+        await sleepAndRefresh(char, taskResult.data);
+        await deposit(char, "currency");
+    }
+}
+
+async function acceptTask(char: CharacterSchema) {
+    if (char.task.length > 0) {
+        return;
+    }
+    await moveTo(char, "tasks_master");
+    const taskResult = await myCharactersApi.actionAcceptNewTaskMyNameActionTaskNewPost({ name: char.name });
+    getLogger(char).info(`Accepted task ${taskResult.data.task.total} ${taskResult.data.task.code}`);
+    await sleepAndRefresh(char, taskResult.data);
 }
 
 async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillEnum) {
