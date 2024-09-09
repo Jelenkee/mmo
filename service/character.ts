@@ -52,7 +52,13 @@ export async function tick(name: string) {
 
         const quarter = Math.floor(new Date().getHours() / 6);
         if (quarter % 2 != 0) {
-            for (const skill of Object.values(GetAllItemsItemsGetCraftSkillEnum)) {
+            for (
+                const skill of [
+                    GetAllItemsItemsGetCraftSkillEnum.Gearcrafting,
+                    GetAllItemsItemsGetCraftSkillEnum.Jewelrycrafting,
+                    GetAllItemsItemsGetCraftSkillEnum.Weaponcrafting,
+                ]
+            ) {
                 const skilledChar = getMostSkilledChar(skill);
                 if (skilledChar === name && char[(skill + "Level") as keyof CharacterSchema] as number < MAX_LEVEL) {
                     const t1 = new Date().getTime();
@@ -393,41 +399,42 @@ async function craft(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkill
         return aQ - bQ;
     });
 
-    const minQuantity = getMinQuantityInBank(skill);
+    const desiredQuantity = getDesiredQuantityInBank(skill);
 
     const target = craftableItems
         .map((item) => {
             if (item.craft == null) {
                 return;
             }
-            const items = item.craft?.items ?? [];
-            if (items.length == 0) {
+            const ingredients = item.craft?.items ?? [];
+            if (ingredients.length == 0) {
                 return;
             }
-            const missing = minQuantity - getBankQuantity(bankItems, item.code);
+            const missing = desiredQuantity - getBankQuantity(bankItems, item.code);
             if (missing <= 0) {
                 return;
             }
 
+            const missingWithBuffer = Math.max(Math.ceil(missing * 1.5), missing + 5);
             const craftableQuantity = Math.min(
-                missing,
-                Math.min(...items.map((ing) => Math.floor(getBankQuantity(bankItems, ing.code) / ing.quantity))),
+                missingWithBuffer,
+                Math.min(...ingredients.map((ing) => Math.floor(getBankQuantity(bankItems, ing.code) / ing.quantity))),
             );
             if (craftableQuantity <= 0) {
                 return;
             }
             const freeSlots = char.inventory?.filter((slot) => !slot.code).length ?? 0;
-            if (freeSlots < items.length + 1) {
+            if (freeSlots < ingredients.length + 1) {
                 return;
             }
             const inventorySpace = char.inventoryMaxItems -
                 (char.inventory?.map((slot) => slot.quantity).reduce((a, c) => a + c, 0) ?? 0);
-            const ingsForOneCraft = items.map((i) => i.quantity).reduce((a, c) => a + c, 0);
+            const ingsForOneCraft = ingredients.map((i) => i.quantity).reduce((a, c) => a + c, 0);
             const maxCrafting = Math.min(craftableQuantity, Math.floor(inventorySpace / ingsForOneCraft));
             return {
                 code: item.code,
                 quantity: maxCrafting,
-                ingredients: items.map((i) => ({ code: i.code, quantity: i.quantity * maxCrafting })),
+                ingredients: ingredients.map((i) => ({ code: i.code, quantity: i.quantity * maxCrafting })),
             };
         })
         .filter(Boolean)
@@ -497,10 +504,12 @@ async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillE
         maxLevel: char[(skill + "Level") as keyof CharacterSchema] as number,
     })).sort((a, b) => a.level - b.level);
     const bankItems = await getBankItems();
-    const shouldSell = craftableItems.every((i) => getBankQuantity(bankItems, i.code) >= getMinQuantityInBank(skill));
+    /*const shouldSell = craftableItems.every((i) =>
+        getBankQuantity(bankItems, i.code) >= getDesiredQuantityInBank(skill)
+    );
     if (!shouldSell) {
         return;
-    }
+    }*/
     const toSellItem =
         (await asyncFilter(craftableItems, async (item) => (await getItem({ code: item.code })).data.ge != null))
             .map((item) => ({ code: item.code, quantity: Math.floor(getBankQuantity(bankItems, item.code) / 5) }))
@@ -545,7 +554,7 @@ async function sell(char: CharacterSchema, skill: GetAllItemsItemsGetCraftSkillE
     await sleepAndRefresh(char, sellResult.data);
 }
 
-function getMinQuantityInBank(skill: GetAllItemsItemsGetCraftSkillEnum) {
+function getDesiredQuantityInBank(skill: GetAllItemsItemsGetCraftSkillEnum) {
     let minQuantity = 5;
     if (skill === GetAllItemsItemsGetCraftSkillEnum.Cooking) {
         minQuantity = 100;
